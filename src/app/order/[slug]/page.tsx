@@ -17,6 +17,7 @@ import { getCampaignBySlug, getRestaurantSettings } from '@/lib/firebase/firesto
 import { resolveTableToken, getOrderingConfig, getTables } from '@/lib/firebase/ordering'
 import { hashToken } from '@/lib/ordering/tokens'
 import { getRestaurantConfig } from '@/config/loader'
+import MainPortalSelector from '@/components/ordering/MainPortalSelector'
 
 interface PortalPageProps {
   params: Promise<{ slug: string }>
@@ -109,15 +110,10 @@ export default async function OrderPortalPage({ params, searchParams }: PortalPa
   const googleReviewUrl =
     campaign.googleReviewUrlOverride || settings?.google?.reviewUrl || config.google?.reviewUrl
 
-  const menuParams = new URLSearchParams()
-  if (tableLabel) menuParams.set('table', tableLabel)
-  if (token) menuParams.set('token', token)
-  const menuHref = `/order/${slug}/menu${menuParams.toString() ? `?${menuParams.toString()}` : ''}`
-
-  const reviewParams = new URLSearchParams()
-  if (tableLabel) reviewParams.set('table', tableLabel)
-  if (token) reviewParams.set('token', token)
-  const reviewHref = `/r/${campaign.slug}${reviewParams.toString() ? `?${reviewParams.toString()}` : ''}`
+  const allTables = await getTables(true).catch(() => [])
+  const activeTables = allTables
+    .filter((t) => t.active)
+    .map((t) => ({ id: t.id, label: t.label }))
 
   return (
     <div className="min-h-screen min-h-[100dvh] bg-[#faf8f5] bg-gradient-to-b from-[#fdfbf7] via-[#fbf7ee] to-[#f6efe0] text-stone-900 flex flex-col px-3 sm:px-6 py-4 sm:py-8 relative overflow-x-hidden selection:bg-amber-600 selection:text-white">
@@ -158,97 +154,18 @@ export default async function OrderPortalPage({ params, searchParams }: PortalPa
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-stone-900 leading-tight">
               {restaurantName}
             </h1>
-
-            {tableLabel ? (
-              <div className="pt-1 flex items-center justify-center">
-                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs font-bold shadow-xs">
-                  <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                  </span>
-                  <MapPin className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>
-                    Seated at <strong className="font-extrabold text-emerald-950 underline underline-offset-2">Table {tableLabel}</strong>
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <p className="text-xs sm:text-sm font-medium text-stone-500">
-                Welcome! Please choose an option below to proceed.
-              </p>
-            )}
           </div>
 
-          {/* Core Actions: Option 1 (Order through Table) & Option 2 (Review Restaurant) */}
-          <div className="space-y-3.5 pt-1 text-left">
-            {/* OPTION 1: ORDER THROUGH A TABLE */}
-            <Link
-              href={menuHref}
-              className="group relative block p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-amber-600 via-amber-500 to-yellow-600 hover:from-amber-700 hover:to-amber-600 text-white shadow-xl shadow-amber-600/25 border border-amber-400/40 hover:shadow-2xl hover:shadow-amber-600/35 transition-all duration-200 active:scale-[0.98]"
-            >
-              <div className="flex items-start gap-3.5 sm:gap-4">
-                <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white/20 backdrop-blur-sm border border-white/30 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-inner">
-                  <UtensilsCrossed className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-100 bg-black/15 px-2 py-0.5 rounded-full inline-block">
-                      {tableLabel ? `Table ${tableLabel} • Dine-in` : 'Dine-in Order'}
-                    </span>
-                    <span className="text-[10px] font-bold text-amber-200 bg-white/15 px-2 py-0.5 rounded-full">
-                      Digital Menu
-                    </span>
-                  </div>
-                  <h2 className="text-base sm:text-lg font-black text-white mt-1 leading-tight flex items-center gap-1.5">
-                    {tableLabel ? `Order through Table ${tableLabel}` : 'Order through a Table'}
-                  </h2>
-                  <p className="text-xs text-amber-50 mt-1 leading-relaxed">
-                    {tableLabel
-                      ? `Browse full menu, customize dishes & order directly for Table ${tableLabel}. Food is served to your table.`
-                      : 'Browse live menu with photos & order fresh food served right to your dining table.'}
-                  </p>
-                  <div className="mt-2.5 flex items-center gap-1.5 text-xs font-bold text-white bg-black/20 hover:bg-black/30 w-fit px-3 py-1 rounded-xl transition-colors">
-                    <span>Open Table Menu</span>
-                    <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-                  </div>
-                </div>
-              </div>
-            </Link>
+          {/* Interactive Table Picker & Core Action Links */}
+          <MainPortalSelector
+            slug={slug}
+            initialTable={tableLabel}
+            token={token}
+            tables={activeTables}
+            restaurantName={restaurantName}
+            reviewSlug={campaign.slug}
+          />
 
-            {/* OPTION 2: REVIEW RESTAURANT & RATE US */}
-            <Link
-              href={reviewHref}
-              className="group relative block p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-white via-amber-50/40 to-stone-50 hover:bg-amber-50/70 border-2 border-amber-200/90 hover:border-amber-400 text-stone-900 shadow-md hover:shadow-xl hover:shadow-amber-500/10 transition-all duration-200 active:scale-[0.98]"
-            >
-              <div className="flex items-start gap-3.5 sm:gap-4">
-                <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-tr from-amber-500/15 to-yellow-500/15 border border-amber-300/50 flex items-center justify-center shrink-0 text-amber-600 group-hover:scale-105 transition-transform shadow-xs">
-                  <Star className="w-6 h-6 sm:w-7 sm:h-7 fill-amber-500 text-amber-500" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-1">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-full inline-block">
-                      Guest Review &amp; Ratings
-                    </span>
-                    <div className="flex items-center gap-0.5 text-amber-500">
-                      {[...Array(5)].map((_, i) => (
-                        <Star key={i} className="w-3 h-3 fill-amber-400 text-amber-400" />
-                      ))}
-                    </div>
-                  </div>
-                  <h2 className="text-base sm:text-lg font-black text-stone-900 mt-1 leading-tight">
-                    Review Restaurant &amp; Rate Us
-                  </h2>
-                  <p className="text-xs text-stone-600 mt-1 leading-relaxed">
-                    Enjoying your dining experience? Share your feedback in 30 seconds &amp; get an instant Google review draft!
-                  </p>
-                  <div className="mt-2.5 flex items-center gap-1.5 text-xs font-bold text-amber-900 bg-amber-100/80 group-hover:bg-amber-200/90 w-fit px-3 py-1 rounded-xl transition-colors">
-                    <span>Leave a Review</span>
-                    <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-                  </div>
-                </div>
-              </div>
-            </Link>
-          </div>
 
           {/* Quick Google Review Direct Shortcut (if URL configured) */}
           {googleReviewUrl && (

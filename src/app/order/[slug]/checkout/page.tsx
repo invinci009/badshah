@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { Loader2, AlertTriangle, ArrowLeft, CheckCircle2, ShieldCheck, Receipt, ShoppingBag } from 'lucide-react'
+import { Loader2, AlertTriangle, ArrowLeft, CheckCircle2, ShieldCheck, Receipt, ShoppingBag, MapPin } from 'lucide-react'
 import { formatPaise, isValidIndianPhone } from '@/lib/ordering/rules.mjs'
 import { loadCart, clearCart, type CartLine } from '@/lib/ordering/cart'
 
@@ -27,6 +27,7 @@ export default function CheckoutPage() {
   const [taxRateBps, setTaxRateBps] = useState(500)
   const [chargePaise, setChargePaise] = useState(0)
   const [tableLabel, setTableLabel] = useState<string | null>(tableParam || null)
+  const [availableTables, setAvailableTables] = useState<Array<{ id: string; label: string }>>([])
   const [contactPhone, setContactPhone] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -63,7 +64,13 @@ export default function CheckoutPage() {
         setMenu(data.items || [])
         setTaxRateBps(data.taxRateBps ?? 500)
         setChargePaise(data.serviceChargePaise ?? 0)
-        const resolvedTable = data.table?.label || tableParam || null
+        setAvailableTables(data.tables || [])
+        let resolvedTable = data.table?.label || tableParam || null
+        if (!resolvedTable && typeof window !== 'undefined') {
+          try {
+            resolvedTable = sessionStorage.getItem(`rp_table_${slug}`) || null
+          } catch {}
+        }
         setTableLabel(resolvedTable)
         if (resolvedTable) {
           const tableCart = loadCart(slug, resolvedTable)
@@ -269,6 +276,69 @@ export default function CheckoutPage() {
             <label htmlFor="co-notes" className="text-xs font-bold text-stone-700">Order Note (optional)</label>
             <textarea id="co-notes" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Less spicy, no onion…" maxLength={280} rows={2} className="w-full px-3.5 py-2.5 rounded-xl bg-stone-50 border border-stone-200 text-sm focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 resize-none transition-all" />
           </div>
+
+          {/* Table selection for main QR orders */}
+          {!token && (
+            <div className="space-y-2 pt-3 border-t border-stone-100">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-stone-700 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 text-amber-600" />
+                  <span>Choose Table Number *</span>
+                </label>
+                {tableLabel && (
+                  <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Table {tableLabel}
+                  </span>
+                )}
+              </div>
+              <p className="text-[11px] text-stone-500">
+                Where are you seated? Food will be delivered to this table:
+              </p>
+
+              <div className="flex flex-wrap gap-2 pt-0.5">
+                {availableTables.map((t) => {
+                  const isSelected = tableLabel === t.label
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => {
+                        setTableLabel(t.label)
+                        try {
+                          sessionStorage.setItem(`rp_table_${slug}`, t.label)
+                        } catch {}
+                      }}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 active:scale-95 ${
+                        isSelected
+                          ? 'bg-amber-600 text-white shadow-sm ring-2 ring-amber-400'
+                          : 'bg-stone-50 text-stone-800 border border-stone-200 hover:border-amber-400 hover:bg-amber-50/50'
+                      }`}
+                    >
+                      <span>Table {t.label}</span>
+                      {isSelected && <CheckCircle2 className="w-3 h-3 text-white" />}
+                    </button>
+                  )
+                })}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTableLabel('Counter')
+                    try {
+                      sessionStorage.setItem(`rp_table_${slug}`, 'Counter')
+                    } catch {}
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 active:scale-95 ${
+                    tableLabel === 'Counter'
+                      ? 'bg-amber-600 text-white shadow-sm ring-2 ring-amber-400'
+                      : 'bg-stone-50 text-stone-800 border border-stone-200 hover:border-amber-400 hover:bg-amber-50/50'
+                  }`}
+                >
+                  <span>Counter / Takeaway</span>
+                  {tableLabel === 'Counter' && <CheckCircle2 className="w-3 h-3 text-white" />}
+                </button>
+              </div>
+            </div>
+          )}
         </section>
 
         {submitError && (

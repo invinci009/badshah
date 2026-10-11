@@ -26,6 +26,9 @@ import {
   HandPlatter,
   Brush,
   Loader2,
+  MapPin,
+  ChevronDown,
+  CheckCircle2,
 } from 'lucide-react'
 import { formatPaise } from '@/lib/ordering/rules.mjs'
 import { loadCart, saveCart, cartLineKey, type CartLine, type CartSelection } from '@/lib/ordering/cart'
@@ -83,6 +86,10 @@ export default function OrderMenuPage() {
   const [staffMsg, setStaffMsg] = useState<string | null>(null)
   const [addedKey, setAddedKey] = useState<string | null>(null)
 
+  // Table Selection for Main QR
+  const [availableTables, setAvailableTables] = useState<Array<{ id: string; label: string }>>([])
+  const [tableModalOpen, setTableModalOpen] = useState(false)
+
   // Service Request Modal
   const [serviceModalOpen, setServiceModalOpen] = useState(false)
   const [serviceType, setServiceType] = useState<string>('water')
@@ -100,6 +107,7 @@ export default function OrderMenuPage() {
         if (!res.ok) throw new Error(data.error || 'Menu unavailable')
         setItems(data.items || [])
         setCategories(data.categories || [])
+        setAvailableTables(data.tables || [])
         const resolvedTable = data.table?.label || tableParam || null
         setTableLabel(resolvedTable)
         if (resolvedTable) {
@@ -320,10 +328,22 @@ export default function OrderMenuPage() {
             <h1 className="font-black text-base truncate flex items-center gap-1.5 text-stone-900">
               <span>{restaurantName || 'Biryani Badshah'}</span>
             </h1>
-            <p className="text-[11px] font-semibold text-amber-700 flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-amber-600 inline-block" />
-              {tableLabel ? `Table ${tableLabel} • Dine-in Ordering` : 'Dine-in Ordering'}
-            </p>
+            {token ? (
+              <p className="text-[11px] font-semibold text-amber-700 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 inline-block" />
+                Table {tableLabel} • Dine-in Ordering
+              </p>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setTableModalOpen(true)}
+                className="mt-0.5 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100/80 hover:bg-amber-200/80 border border-amber-300 text-[11px] font-bold text-amber-950 cursor-pointer transition-all shadow-xs active:scale-95"
+              >
+                <MapPin className="w-3 h-3 text-amber-600 shrink-0" />
+                <span>{tableLabel ? `Table ${tableLabel}` : 'Choose Table'}</span>
+                <ChevronDown className="w-3 h-3 text-amber-700 shrink-0" />
+              </button>
+            )}
           </div>
           {contactPhone && (
             <a
@@ -672,6 +692,86 @@ export default function OrderMenuPage() {
               <span>Add to Tray</span>
               <span className="font-black text-sm">{formatPaise(currentCustomizingTotal)}</span>
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Table Selection Modal for Main QR */}
+      {tableModalOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-stone-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 animate-in fade-in duration-200"
+          onClick={() => setTableModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 space-y-4 animate-in slide-in-from-bottom-4 duration-300 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-amber-50 text-amber-600">
+                  <MapPin className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-extrabold text-stone-900">Select Your Table</h3>
+                  <p className="text-[11px] text-stone-500">Food will be served directly to this table</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTableModalOpen(false)}
+                className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 max-h-60 overflow-y-auto py-1">
+              {availableTables.map((t) => {
+                const isSelected = tableLabel === t.label
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      setTableLabel(t.label)
+                      setTableModalOpen(false)
+                      try {
+                        sessionStorage.setItem(`rp_table_${slug}`, t.label)
+                      } catch {}
+                      const newCart = loadCart(slug, t.label)
+                      setCart(newCart)
+                    }}
+                    className={`py-2.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 active:scale-95 ${
+                      isSelected
+                        ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 ring-2 ring-amber-400'
+                        : 'bg-stone-50 text-stone-800 border border-stone-200 hover:border-amber-400 hover:bg-amber-50/50'
+                    }`}
+                  >
+                    <span className="text-[10px] text-stone-400 group-hover:text-amber-700">Table</span>
+                    <span className="text-sm font-black">{t.label}</span>
+                  </button>
+                )
+              })}
+              <button
+                type="button"
+                onClick={() => {
+                  setTableLabel('Counter')
+                  setTableModalOpen(false)
+                  try {
+                    sessionStorage.setItem(`rp_table_${slug}`, 'Counter')
+                  } catch {}
+                  const newCart = loadCart(slug, 'Counter')
+                  setCart(newCart)
+                }}
+                className={`py-2.5 px-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 active:scale-95 col-span-3 ${
+                  tableLabel === 'Counter'
+                    ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 ring-2 ring-amber-400'
+                    : 'bg-stone-50 text-stone-800 border border-stone-200 hover:border-amber-400 hover:bg-amber-50/50'
+                }`}
+              >
+                <span>Counter / Takeaway</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

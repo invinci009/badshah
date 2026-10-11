@@ -54,11 +54,12 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const [categories, items, ordering, settings] = await Promise.all([
+    const [categories, items, ordering, settings, diningTables] = await Promise.all([
       getOrderMenuCategories().catch(() => []),
       getOrderMenuItems().catch(() => []),
       getOrderingConfig().catch(() => ({ taxRateBps: 500, serviceChargePaise: 0, currency: 'INR' as const })),
       getRestaurantSettings().catch(() => null),
+      getTables(true).catch(() => []),
     ])
 
     return NextResponse.json(
@@ -67,6 +68,7 @@ export async function GET(request: NextRequest) {
         logoUrl: settings?.branding?.logoUrl || config.branding.logoUrl || null,
         contactPhone: settings?.contact?.phone || config.contact.phone || null,
         table,
+        tables: diningTables.filter((t) => t.active).map((t) => ({ id: t.id, label: t.label })),
         taxRateBps: ordering.taxRateBps,
         serviceChargePaise: ordering.serviceChargePaise,
         currency: 'INR',
