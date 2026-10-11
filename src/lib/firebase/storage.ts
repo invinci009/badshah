@@ -62,7 +62,7 @@ export async function uploadFile(
     console.error('Firebase storage upload error:', fbErr)
   }
 
-  throw new Error('Storage service unavailable')
+  throw new Error('Storage service unavailable. Please check that Supabase storage credentials (NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) or Firebase Storage are configured.')
 }
 
 /**
