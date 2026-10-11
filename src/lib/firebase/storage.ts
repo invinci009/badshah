@@ -1,22 +1,23 @@
 import 'server-only'
+import { randomUUID } from 'crypto'
 import { getAdminStorage } from './admin'
-import { createClient } from '@supabase/supabase-js'
 
 // ==============================================================================
-// Storage Helpers
-// ==============================================================================
-// Supports Supabase Storage (primary) and Firebase Storage (secondary/fallback).
+// Firebase Storage Helpers (Images & Assets)
 // ==============================================================================
 
-function getSupabaseAdmin() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url || !key) return null
-  return createClient(url, key)
+function getStorageBucket() {
+  const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET?.trim()
+  if (!bucketName) {
+    throw new Error(
+      'NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET is not set. Please add your Firebase Storage bucket name.'
+    )
+  }
+  return getAdminStorage().bucket(bucketName)
 }
 
 /**
- * Upload a file to storage and return its public URL.
+ * Upload a file to Firebase Storage and return its public URL.
  */
 export async function uploadFile(
   path: string,
@@ -24,90 +25,59 @@ export async function uploadFile(
   contentType: string
 ): Promise<string> {
   const cleanPath = path.replace(/^\/+/, '')
+  const bucket = getStorageBucket()
+  const file = bucket.file(cleanPath)
+  const downloadToken = randomUUID()
 
-  // 1. Try Supabase storage if available
-  const sb = getSupabaseAdmin()
-  if (sb) {
-    try {
-      const bucketName = 'menu-items'
-      const { error } = await sb.storage
-        .from(bucketName)
-        .upload(cleanPath, data, { contentType, upsert: true })
-
-      if (!error) {
-        const { data: pub } = sb.storage.from(bucketName).getPublicUrl(cleanPath)
-        if (pub?.publicUrl) return pub.publicUrl
-      } else {
-        console.warn('Supabase storage upload error, trying Firebase:', error.message)
-      }
-    } catch (sbErr) {
-      console.warn('Supabase storage upload exception:', sbErr)
-    }
-  }
-
-  // 2. Try Firebase Storage
   try {
-    const bucket = getAdminStorage().bucket()
-    const file = bucket.file(cleanPath)
-
     await file.save(data, {
       metadata: {
         contentType,
+        metadata: {
+          firebaseStorageDownloadTokens: downloadToken,
+        },
       },
     })
 
+    // Attempt public access for standard GCS ACLs if allowed
     await file.makePublic().catch(() => {})
-    return `https://storage.googleapis.com/${bucket.name}/${cleanPath}`
-  } catch (fbErr) {
-    console.error('Firebase storage upload error:', fbErr)
-  }
 
-  throw new Error('Storage service unavailable. Please check that Supabase storage credentials (NEXT_PUBLIC_SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) or Firebase Storage are configured.')
+    // Firebase Storage persistent download URL
+    const encodedPath = encodeURIComponent(cleanPath)
+    return `https://firebasestorage.googleapis.com/v0/b/${bucket.name}/o/${encodedPath}?alt=media&token=${downloadToken}`
+  } catch (error: unknown) {
+    console.error('Firebase storage upload error:', error)
+    const msg = error instanceof Error ? error.message : String(error)
+    if (msg.includes('bucket does not exist') || (error as { code?: number })?.code === 404) {
+      throw new Error(
+        `Firebase Storage bucket "${bucket.name}" does not exist. Please go to Firebase Console > Build > Storage and click "Get started" to initialize it.`
+      )
+    }
+    throw new Error(`Firebase Storage error: ${msg}`)
+  }
 }
 
 /**
- * Delete a file from Storage.
+ * Delete a file from Firebase Storage.
  */
 export async function deleteFile(path: string): Promise<void> {
   const cleanPath = path.replace(/^\/+/, '')
-  const sb = getSupabaseAdmin()
-  if (sb) {
-    try {
-      await sb.storage.from('menu-items').remove([cleanPath])
-      return
-    } catch (e) {
-      console.warn('Supabase delete error:', e)
-    }
-  }
-
   try {
-    const bucket = getAdminStorage().bucket()
+    const bucket = getStorageBucket()
     const file = bucket.file(cleanPath)
     await file.delete()
-  } catch (e) {
-    console.warn('Firebase delete error:', e)
+  } catch (err) {
+    console.warn('Firebase storage delete warning:', err)
   }
 }
 
 /**
- * Check if a file exists in Storage.
+ * Check if a file exists in Firebase Storage.
  */
 export async function fileExists(path: string): Promise<boolean> {
   const cleanPath = path.replace(/^\/+/, '')
-  const sb = getSupabaseAdmin()
-  if (sb) {
-    try {
-      const dir = cleanPath.includes('/') ? cleanPath.substring(0, cleanPath.lastIndexOf('/')) : ''
-      const filename = cleanPath.split('/').pop() || cleanPath
-      const { data } = await sb.storage.from('menu-items').list(dir)
-      if (data?.some((f) => f.name === filename)) return true
-    } catch (e) {
-      console.warn('Supabase exists check error:', e)
-    }
-  }
-
   try {
-    const bucket = getAdminStorage().bucket()
+    const bucket = getStorageBucket()
     const file = bucket.file(cleanPath)
     const [exists] = await file.exists()
     return exists
@@ -117,32 +87,22 @@ export async function fileExists(path: string): Promise<boolean> {
 }
 
 /**
- * Get a public URL for a file.
+ * Get a public URL for a file in Firebase Storage.
  */
 export function getPublicUrl(path: string): string {
   const cleanPath = path.replace(/^\/+/, '')
-  const sbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
-  if (sbUrl) {
-    return `${sbUrl}/storage/v1/object/public/menu-items/${cleanPath}`
-  }
-  const bucketName = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET
-  return `https://storage.googleapis.com/${bucketName}/${cleanPath}`
+  const bucketName =
+    process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET?.trim() || 'default'
+  const encodedPath = encodeURIComponent(cleanPath)
+  return `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o/${encodedPath}?alt=media`
 }
 
 /**
- * Generate a signed URL for temporary access.
+ * Generate a signed URL for temporary access to a Firebase Storage file.
  */
 export async function getSignedUrl(path: string, expiresInMinutes = 60): Promise<string> {
   const cleanPath = path.replace(/^\/+/, '')
-  const sb = getSupabaseAdmin()
-  if (sb) {
-    const { data } = await sb.storage
-      .from('menu-items')
-      .createSignedUrl(cleanPath, expiresInMinutes * 60)
-    if (data?.signedUrl) return data.signedUrl
-  }
-
-  const bucket = getAdminStorage().bucket()
+  const bucket = getStorageBucket()
   const file = bucket.file(cleanPath)
   const [url] = await file.getSignedUrl({
     action: 'read',
