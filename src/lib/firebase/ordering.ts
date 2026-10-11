@@ -517,10 +517,9 @@ export async function getOrdersByTable(tableId: string, limit = 200): Promise<Or
   const snap = await getDb()
     .collection('orders')
     .where('tableId', '==', tableId)
-    .orderBy('createdAt', 'desc')
-    .limit(limit)
     .get()
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+  const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+  return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, limit)
 }
 
 /** Allocate the next human-readable order number atomically. */
@@ -557,11 +556,11 @@ export async function transitionOrderStatus(
   const db = getDb()
   const allowed: Record<string, string[]> = {
     RECEIVED: ['ACCEPTED', 'CANCELLED'],
-    ACCEPTED: ['PREPARING', 'CANCELLED'],
-    PREPARING: ['READY', 'CANCELLED'],
-    READY: ['SERVED'],
-    SERVED: [],
-    CANCELLED: [],
+    ACCEPTED: ['PREPARING', 'READY', 'CANCELLED', 'RECEIVED'],
+    PREPARING: ['READY', 'SERVED', 'CANCELLED', 'ACCEPTED'],
+    READY: ['SERVED', 'PREPARING', 'CANCELLED'],
+    SERVED: ['READY', 'CANCELLED'],
+    CANCELLED: ['RECEIVED'],
   }
   const updated = await db.runTransaction(async (tx) => {
     const ref = db.doc(`orders/${orderId}`)
@@ -609,6 +608,63 @@ export async function transitionOrderStatus(
   }
 
   return updated
+}
+
+/** Update order details (table, notes, customer, status). */
+export async function updateOrder(
+  orderId: string,
+  updates: {
+    tableId?: string | null
+    tableLabel?: string | null
+    customerName?: string
+    customerPhone?: string
+    notes?: string | null
+    fulfilment?: FulfilmentStatus
+  },
+  actor: { uid: string; email?: string | null }
+): Promise<Order> {
+  const db = getDb()
+  const ref = db.doc(`orders/${orderId}`)
+  const snap = await ref.get()
+  if (!snap.exists) throw new Error('NOT_FOUND')
+  const prev = { id: snap.id, ...snap.data() } as Order
+
+  const cleanUpdates: Record<string, unknown> = {
+    updatedAt: serverNow(),
+  }
+
+  if (updates.tableId !== undefined) {
+    cleanUpdates.tableId = updates.tableId
+    cleanUpdates.tableLabel = updates.tableLabel ?? null
+  }
+  if (updates.customerName !== undefined) cleanUpdates.customerName = updates.customerName.trim()
+  if (updates.customerPhone !== undefined) cleanUpdates.customerPhone = updates.customerPhone.trim()
+  if (updates.notes !== undefined) cleanUpdates.notes = updates.notes ? updates.notes.trim() : null
+  if (updates.fulfilment !== undefined) cleanUpdates.fulfilment = updates.fulfilment
+
+  await ref.update(cleanUpdates)
+
+  // Audit event
+  const eventRef = db.collection('orderEvents').doc()
+  await eventRef.set({
+    orderId,
+    restaurantId: RESTAURANT_ID,
+    type: 'UPDATE',
+    actorUid: actor.uid,
+    actorEmail: actor.email || null,
+    reason: 'Manager updated order details',
+    createdAt: serverNow(),
+  })
+
+  // Table state management if table changed
+  if (updates.tableId !== undefined && updates.tableId !== prev.tableId) {
+    if (updates.tableId) {
+      await db.doc(`diningTables/${updates.tableId}`).update({ state: 'occupied', updatedAt: serverNow() }).catch(() => {})
+    }
+  }
+
+  const updatedSnap = await ref.get()
+  return { id: updatedSnap.id, ...updatedSnap.data() } as Order
 }
 
 /** Record a collection/refund inside a transaction. Prevents over-collection. */
@@ -691,9 +747,9 @@ export async function getOrderEvents(orderId: string): Promise<OrderEvent[]> {
   const snap = await getDb()
     .collection('orderEvents')
     .where('orderId', '==', orderId)
-    .orderBy('createdAt', 'asc')
     .get()
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderEvent)
+  const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderEvent)
+  return list.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''))
 }
 
 export interface PaymentEntry {
@@ -712,9 +768,9 @@ export async function getPaymentEntries(orderId: string): Promise<PaymentEntry[]
   const snap = await getDb()
     .collection('paymentEntries')
     .where('orderId', '==', orderId)
-    .orderBy('createdAt', 'asc')
     .get()
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PaymentEntry)
+  const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PaymentEntry)
+  return list.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''))
 }
 
 export async function getRecentPaymentEntries(limit = 2000): Promise<PaymentEntry[]> {
@@ -763,9 +819,12 @@ export async function createServiceRequest(data: {
 }
 
 export async function getServiceRequests(status?: string, limit = 200): Promise<ServiceRequest[]> {
-  let q = getDb().collection('serviceRequests').orderBy('createdAt', 'desc')
-  if (status) q = q.where('status', '==', status) as typeof q
-  const snap = await q.limit(limit).get()
+  if (status) {
+    const snap = await getDb().collection('serviceRequests').where('status', '==', status).get()
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)
+    return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, limit)
+  }
+  const snap = await getDb().collection('serviceRequests').orderBy('createdAt', 'desc').limit(limit).get()
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)
 }
 
