@@ -47,13 +47,34 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   // sequential awaits — each one cost a full Firestore round-trip, so page
   // load grew linearly with every query. Results are identical, just concurrent.
   const [settingsResult, campaigns, events, privateFeedbackData, menuItems, diningTables, orderMenuItems] = await Promise.all([
-    getRestaurantSettings(),
-    getCampaigns(),
-    getEvents({ limit: 10000 }),
-    getPrivateFeedback(),
-    getMenuItems(),
-    getTables(true).catch(() => []),
-    getOrderMenuItems().catch(() => []),
+    getRestaurantSettings().catch((e) => {
+      console.warn('Dashboard getRestaurantSettings failed:', e.message)
+      return null
+    }),
+    getCampaigns().catch((e) => {
+      console.warn('Dashboard getCampaigns failed:', e.message)
+      return []
+    }),
+    getEvents({ limit: 200 }).catch((e) => {
+      console.warn('Dashboard getEvents failed:', e.message)
+      return []
+    }),
+    getPrivateFeedback().catch((e) => {
+      console.warn('Dashboard getPrivateFeedback failed:', e.message)
+      return []
+    }),
+    getMenuItems().catch((e) => {
+      console.warn('Dashboard getMenuItems failed:', e.message)
+      return []
+    }),
+    getTables(true).catch((e) => {
+      console.warn('Dashboard getTables failed:', e.message)
+      return []
+    }),
+    getOrderMenuItems().catch((e) => {
+      console.warn('Dashboard getOrderMenuItems failed:', e.message)
+      return []
+    }),
   ])
   const config = getRestaurantConfig()
 
@@ -76,12 +97,11 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     }
   }
 
-  // 3. (merged into the Promise.all above)
-  // 4. (merged into the Promise.all above)
-
-  // 5. Fetch sessions for all event sessionIds — in parallel, not one-by-one
-  const sessionIds = [...new Set(events.map((e) => e.sessionId).filter(Boolean))] as string[]
-  const sessionDocs = await Promise.all(sessionIds.map((sessionId) => getSession(sessionId)))
+  // 5. Fetch sessions for all event sessionIds — safely with catch
+  const sessionIds = [...new Set(events.map((e) => e.sessionId).filter(Boolean))].slice(0, 100) as string[]
+  const sessionDocs = await Promise.all(
+    sessionIds.map((sessionId) => getSession(sessionId).catch(() => null))
+  )
   const sessions: Array<{ id: string; campaignId: string; status: string; createdAt: string; completedAt: string | null }> = []
 
   for (const session of sessionDocs) {
@@ -96,10 +116,10 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     }
   }
 
-  // 6-7. Fetch answers + drafts for all sessions in parallel
+  // 6-7. Fetch answers + drafts for all sessions safely
   const [answersList, draftsList] = await Promise.all([
-    Promise.all(sessions.map((session) => getSessionAnswers(session.id))),
-    Promise.all(sessions.map((session) => getReviewDraft(session.id))),
+    Promise.all(sessions.map((session) => getSessionAnswers(session.id).catch(() => []))),
+    Promise.all(sessions.map((session) => getReviewDraft(session.id).catch(() => null))),
   ])
 
   // 6. Index answers by session

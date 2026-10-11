@@ -190,7 +190,11 @@ export default function OrdersTab({
 
   useEffect(() => {
     const raf = requestAnimationFrame(() => fetchOrders())
-    const t = setInterval(() => fetchOrders(true), 15000)
+    const t = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchOrders(true)
+      }
+    }, 30000)
     return () => {
       cancelAnimationFrame(raf)
       clearInterval(t)

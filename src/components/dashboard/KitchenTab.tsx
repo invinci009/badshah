@@ -106,7 +106,11 @@ export default function KitchenTab() {
   useEffect(() => {
     // Deferred initial load: the fetch resolves asynchronously after mount.
     const raf = requestAnimationFrame(() => load())
-    const t = setInterval(load, 12000)
+    const t = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        load()
+      }
+    }, 25000)
     return () => {
       cancelAnimationFrame(raf)
       clearInterval(t)
