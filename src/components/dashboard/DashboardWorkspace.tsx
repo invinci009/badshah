@@ -7,6 +7,11 @@ import CampaignsTab, { type CampaignItem } from './CampaignsTab'
 import ResponsesTab, { type ResponseItem } from './ResponsesTab'
 import FeedbackTab, { type PrivateFeedbackItem } from './FeedbackTab'
 import MenuTab, { type MenuItem as DashboardMenuItem } from './MenuTab'
+import TablesTab, { type TableItem } from './TablesTab'
+import OrderMenuTab from './OrderMenuTab'
+import OrdersTab from './OrdersTab'
+import KitchenTab from './KitchenTab'
+import ReportsTab from './ReportsTab'
 import SettingsTab, { type BusinessSettings } from './SettingsTab'
 import CustomersPortalTab, { type CustomerDetail } from './CustomersPortalTab'
 import MobileBottomNav from './MobileBottomNav'
@@ -24,6 +29,11 @@ import {
   ExternalLink,
   Download,
   Menu,
+  Table2,
+  ClipboardList,
+  ChefHat,
+  BarChart3,
+  Receipt,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -36,14 +46,17 @@ interface DashboardWorkspaceProps {
   feedbackList: PrivateFeedbackItem[]
   menuItems: DashboardMenuItem[]
   customers?: CustomerDetail[]
+  tables?: TableItem[]
+  portalSlug?: string
+  orderMenuCount?: number
   userEmail?: string
 }
 
-type TabType = 'overview' | 'customers' | 'responses' | 'campaigns' | 'feedback' | 'menu' | 'settings'
+type TabType = 'overview' | 'customers' | 'responses' | 'campaigns' | 'feedback' | 'menu' | 'orderMenu' | 'orders' | 'kitchen' | 'reports' | 'tables' | 'settings'
 
 export type { TabType }
 
-const VALID_TABS: TabType[] = ['overview', 'customers', 'responses', 'campaigns', 'feedback', 'menu', 'settings']
+const VALID_TABS: TabType[] = ['overview', 'customers', 'responses', 'campaigns', 'feedback', 'menu', 'orderMenu', 'orders', 'kitchen', 'reports', 'tables', 'settings']
 
 export default function DashboardWorkspace({
   initialTab: propInitialTab,
@@ -54,6 +67,9 @@ export default function DashboardWorkspace({
   feedbackList,
   menuItems,
   customers = [],
+  tables = [],
+  portalSlug = 'order',
+  orderMenuCount = 0,
   userEmail = 'admin',
 }: DashboardWorkspaceProps) {
   const router = useRouter()
@@ -109,6 +125,11 @@ export default function DashboardWorkspace({
       badge: feedbackList.length > 0 ? feedbackList.length : undefined,
     },
     { key: 'menu', label: 'Menu', icon: Utensils, badge: menuItems.length },
+    { key: 'orderMenu', label: 'Order Menu', icon: ClipboardList, badge: orderMenuCount },
+    { key: 'orders', label: 'Orders', icon: Receipt },
+    { key: 'kitchen', label: 'Kitchen', icon: ChefHat },
+    { key: 'reports', label: 'Reports', icon: BarChart3 },
+    { key: 'tables', label: 'Tables', icon: Table2, badge: tables.length },
     { key: 'settings', label: 'Settings', icon: Settings },
   ]
 
@@ -220,6 +241,13 @@ export default function DashboardWorkspace({
         {activeTab === 'menu' && (
           <MenuTab menuItems={menuItems} onRefresh={handleRefresh} />
         )}
+        {activeTab === 'tables' && (
+          <TablesTab tables={tables} portalSlug={portalSlug} onRefresh={handleRefresh} />
+        )}
+        {activeTab === 'orderMenu' && <OrderMenuTab onRefresh={handleRefresh} />}
+        {activeTab === 'orders' && <OrdersTab tables={tables.map((t) => ({ id: t.id, label: t.label }))} onRefresh={handleRefresh} />}
+        {activeTab === 'kitchen' && <KitchenTab />}
+        {activeTab === 'reports' && <ReportsTab />}
         {activeTab === 'settings' && (
           <SettingsTab business={business} onRefresh={handleRefresh} userEmail={userEmail} />
         )}

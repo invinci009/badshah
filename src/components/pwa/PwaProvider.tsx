@@ -69,26 +69,14 @@ export function PwaProvider({ children }: { children: React.ReactNode }) {
       (window.navigator as unknown as { standalone?: boolean }).standalone === true ||
       document.referrer.includes('android-app://')
 
-    // Register service worker if supported
+    // Unregister any existing service worker to prevent it from
+    // intercepting navigation requests and serving stale offline pages.
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker
-        .register('/sw.js', { scope: '/' })
-        .then((reg) => {
-          // Check for updates
-          reg.addEventListener('updatefound', () => {
-            const installingWorker = reg.installing
-            if (installingWorker) {
-              installingWorker.addEventListener('statechange', () => {
-                if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                  console.log('[PWA] New content is available; please refresh.')
-                }
-              })
-            }
-          })
-        })
-        .catch((err) => {
-          console.warn('[PWA] Service Worker registration failed:', err)
-        })
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        for (const reg of registrations) {
+          reg.unregister()
+        }
+      }).catch(() => {})
     }
 
     // Capture Android/Desktop beforeinstallprompt event

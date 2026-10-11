@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
-import { Sparkles, LayoutDashboard, QrCode, MessageSquare, Utensils, Settings, LogOut, Users } from 'lucide-react'
+import { Sparkles, LayoutDashboard, QrCode, MessageSquare, Utensils, Settings, LogOut, Users, Table2, Receipt, ChefHat } from 'lucide-react'
 import { getRestaurantConfig } from '@/config/loader'
 import { getBrandingTokens } from '@/config/branding'
 import type { AuthUser } from '@/lib/firebase/auth'
@@ -98,6 +98,27 @@ export default async function DashboardLayout({ children }: { children: React.Re
               >
                 <Utensils className="w-4 h-4 text-emerald-400" />
                 Menu
+              </Link>
+              <Link
+                href="/dashboard?tab=tables"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 font-medium transition-colors"
+              >
+                <Table2 className="w-4 h-4 text-amber-400" />
+                Tables
+              </Link>
+              <Link
+                href="/dashboard?tab=orders"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 font-medium transition-colors"
+              >
+                <Receipt className="w-4 h-4 text-emerald-400" />
+                Orders
+              </Link>
+              <Link
+                href="/dashboard?tab=kitchen"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-slate-300 hover:text-white hover:bg-slate-800/80 font-medium transition-colors"
+              >
+                <ChefHat className="w-4 h-4 text-rose-400" />
+                Kitchen
               </Link>
               <Link
                 href="/dashboard?tab=settings"

@@ -7,6 +7,7 @@
     "build": "node --require ./scripts/fat32-readlink-shim.cjs node_modules/next/dist/bin/next build --webpack",
     "start": "next start",
     "lint": "eslint",
+    "test": "node --test tests/ordering.test.mjs",
     "change-password": "node scripts/change-password.js",
     "client:validate": "node scripts/validate-client.js",
     "client:build": "node scripts/deploy-client.js",

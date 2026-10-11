@@ -11,6 +11,8 @@ import {
   getPrivateFeedback,
   getMenuItems,
 } from '@/lib/firebase/firestore'
+import { getTables } from '@/lib/firebase/ordering'
+import { getOrderMenuItems } from '@/lib/firebase/ordering'
 import { getRestaurantConfig } from '@/config/loader'
 import DashboardWorkspace from '@/components/dashboard/DashboardWorkspace'
 import type { AnalyticsData } from '@/components/dashboard/OverviewTab'
@@ -44,12 +46,14 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   // 2-4, 8-9. Fetch independent collections in parallel. These were
   // sequential awaits — each one cost a full Firestore round-trip, so page
   // load grew linearly with every query. Results are identical, just concurrent.
-  const [settingsResult, campaigns, events, privateFeedbackData, menuItems] = await Promise.all([
+  const [settingsResult, campaigns, events, privateFeedbackData, menuItems, diningTables, orderMenuItems] = await Promise.all([
     getRestaurantSettings(),
     getCampaigns(),
     getEvents({ limit: 10000 }),
     getPrivateFeedback(),
     getMenuItems(),
+    getTables(true).catch(() => []),
+    getOrderMenuItems().catch(() => []),
   ])
   const config = getRestaurantConfig()
 
@@ -355,6 +359,19 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     created_at: c.createdAt,
   }))
 
+  const portalSlug = campaigns.find((c) => c.active)?.slug || campaigns[0]?.slug || 'order'
+
+  const tableItems = diningTables.map((t) => ({
+    id: t.id,
+    label: t.label,
+    description: t.description,
+    active: t.active,
+    state: t.state,
+    activeTokenHash: t.activeTokenHash,
+    activeTokenPrefix: t.activeTokenPrefix,
+    createdAt: t.createdAt,
+  }))
+
   return (
     <DashboardWorkspace
       initialTab={tab}
@@ -374,6 +391,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       customers={customerDetails}
       feedbackList={feedbackList}
       menuItems={menuItems}
+      tables={tableItems}
+      portalSlug={portalSlug}
+      orderMenuCount={orderMenuItems.length}
       userEmail={user.email || 'admin'}
     />
   )

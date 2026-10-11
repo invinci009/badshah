@@ -1,0 +1,776 @@
+import 'server-only'
+import type { Firestore } from 'firebase-admin/firestore'
+import { getAdminFirestore } from './admin'
+
+// ==============================================================================
+// Ordering persistence (Firestore, Admin SDK, server-only).
+// Single-restaurant deployment: every doc carries restaurantId: 'default' for
+// future-proofing; isolation today is per-Firebase-project.
+// Money in integer paise. Timestamps are server-generated ISO strings.
+// No hard-deletes for orders or payment records.
+// ==============================================================================
+
+function getDb(): Firestore {
+  return getAdminFirestore()
+}
+
+function stripUndefined<T extends Record<string, unknown>>(obj: T): T {
+  const clean: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) clean[key] = value
+  }
+  return clean as T
+}
+
+const RESTAURANT_ID = 'default'
+const serverNow = () => new Date().toISOString()
+
+// ---------------------------------------------------------------------------
+// Dining tables + QR tokens
+// ---------------------------------------------------------------------------
+
+export type TableState = 'available' | 'occupied' | 'cleaning'
+
+export interface DiningTable {
+  id: string
+  restaurantId: string
+  label: string
+  description?: string
+  active: boolean
+  state: TableState
+  activeTokenHash: string | null
+  activeTokenPrefix: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface TableQrToken {
+  tokenHash: string
+  tableId: string
+  restaurantId: string
+  /** Plaintext token — admin-only doc, never exposed publicly or logged. */
+  token: string
+  prefix: string
+  revokedAt: string | null
+  createdAt: string
+}
+
+export async function getTables(includeInactive = true): Promise<DiningTable[]> {
+  const q = getDb().collection('diningTables').orderBy('label', 'asc')
+  const snapshot = await q.get()
+  const tables = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as DiningTable)
+  return includeInactive ? tables : tables.filter((t) => t.active)
+}
+
+export async function getTable(id: string): Promise<DiningTable | null> {
+  const snap = await getDb().doc(`diningTables/${id}`).get()
+  if (!snap.exists) return null
+  return { id: snap.id, ...snap.data() } as DiningTable
+}
+
+/** Normalizes table labels (e.g. "Table 1", "table 1", "T-1", "01" -> "1") to prevent table collision. */
+export function normalizeTableLabel(label: string): string {
+  let clean = label.trim().toLowerCase()
+  if (clean.startsWith('table')) clean = clean.slice(5).trim()
+  if (clean.startsWith('t-') || clean.startsWith('t#')) clean = clean.slice(2).trim()
+  else if (clean.startsWith('t') && /^t\d+$/.test(clean)) clean = clean.slice(1).trim()
+  if (/^\d+$/.test(clean)) clean = String(parseInt(clean, 10))
+  return clean
+}
+
+export async function createTable(data: { label: string; description?: string }): Promise<DiningTable> {
+  const label = data.label.trim()
+  const norm = normalizeTableLabel(label)
+  const existing = await getTables(true)
+  const duplicate = existing.find((t) => normalizeTableLabel(t.label) === norm)
+  if (duplicate) {
+    throw new Error(
+      `Table "${label}" conflicts with existing Table "${duplicate.label}". Every table must have a distinct identifier.`
+    )
+  }
+
+  const ref = getDb().collection('diningTables').doc()
+  const now = serverNow()
+  const table: Omit<DiningTable, 'id'> = {
+    restaurantId: RESTAURANT_ID,
+    label,
+    description: data.description || undefined,
+    active: true,
+    state: 'available',
+    activeTokenHash: null,
+    activeTokenPrefix: null,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await ref.set(stripUndefined({ ...table }))
+  return { id: ref.id, ...table } as DiningTable
+}
+
+export async function updateTable(
+  id: string,
+  data: Partial<Pick<DiningTable, 'label' | 'description' | 'active' | 'state'>>
+): Promise<void> {
+  if (data.label) {
+    const label = data.label.trim()
+    const norm = normalizeTableLabel(label)
+    const existing = await getTables(true)
+    const duplicate = existing.find((t) => t.id !== id && normalizeTableLabel(t.label) === norm)
+    if (duplicate) {
+      throw new Error(
+        `Table "${label}" conflicts with existing Table "${duplicate.label}". Every table must have a distinct identifier.`
+      )
+    }
+  }
+
+  await getDb()
+    .doc(`diningTables/${id}`)
+    .update(stripUndefined({ ...data, updatedAt: serverNow() }))
+}
+
+/** Delete a table, revoke its active/historical tokens, and ensure no active orders are left dangling. */
+export async function deleteTable(id: string): Promise<void> {
+  const db = getDb()
+  const tableRef = db.doc(`diningTables/${id}`)
+  const snap = await tableRef.get()
+  if (!snap.exists) return
+
+  const data = snap.data() as DiningTable
+
+  // Check if there are active unfulfilled orders on this table
+  const ordersSnap = await db.collection('orders').where('tableId', '==', id).get()
+  const activeOrders = ordersSnap.docs.filter((d) => {
+    const f = d.data()?.fulfilment
+    return f && f !== 'SERVED' && f !== 'CANCELLED'
+  })
+  if (activeOrders.length > 0) {
+    throw new Error(
+      `Cannot delete table: Table "${data.label}" has ${activeOrders.length} active order(s) in progress. Please complete or cancel them first.`
+    )
+  }
+
+  const batch = db.batch()
+
+  // Revoke active token if one exists
+  if (data?.activeTokenHash) {
+    batch.update(db.doc(`tableQrTokens/${data.activeTokenHash}`), { revokedAt: serverNow() })
+  }
+
+  // Revoke any tokens associated with this table
+  const tokensSnap = await db.collection('tableQrTokens').where('tableId', '==', id).get()
+  tokensSnap.docs.forEach((doc) => {
+    batch.update(doc.ref, { revokedAt: serverNow() })
+  })
+
+  // Delete the dining table doc
+  batch.delete(tableRef)
+  await batch.commit()
+}
+
+/** Issue (or rotate) a table QR token. Revokes the previous token, keeps history. */
+export async function issueTableToken(
+  tableId: string,
+  token: string,
+  tokenHash: string,
+  prefix: string
+): Promise<void> {
+  const db = getDb()
+  const tableRef = db.doc(`diningTables/${tableId}`)
+  const tableSnap = await tableRef.get()
+  if (!tableSnap.exists) throw new Error('Table not found')
+  const prev = (tableSnap.data() as DiningTable).activeTokenHash
+
+  const batch = db.batch()
+  if (prev) {
+    batch.update(db.doc(`tableQrTokens/${prev}`), { revokedAt: serverNow() })
+  }
+  batch.set(db.doc(`tableQrTokens/${tokenHash}`), {
+    tableId,
+    restaurantId: RESTAURANT_ID,
+    token,
+    prefix,
+    revokedAt: null,
+    createdAt: serverNow(),
+  })
+  batch.update(tableRef, {
+    activeTokenHash: tokenHash,
+    activeTokenPrefix: prefix,
+    updatedAt: serverNow(),
+  })
+  await batch.commit()
+}
+
+/** Revoke the active token without deleting the table or its history. */
+export async function revokeTableToken(tableId: string): Promise<void> {
+  const db = getDb()
+  const tableRef = db.doc(`diningTables/${tableId}`)
+  const tableSnap = await tableRef.get()
+  if (!tableSnap.exists) throw new Error('Table not found')
+  const prev = (tableSnap.data() as DiningTable).activeTokenHash
+  const batch = db.batch()
+  if (prev) batch.update(db.doc(`tableQrTokens/${prev}`), { revokedAt: serverNow() })
+  batch.update(tableRef, { activeTokenHash: null, activeTokenPrefix: null, updatedAt: serverNow() })
+  await batch.commit()
+}
+
+export async function getTableTokenByHash(tokenHash: string): Promise<TableQrToken | null> {
+  const snap = await getDb().doc(`tableQrTokens/${tokenHash}`).get()
+  if (!snap.exists) return null
+  return { tokenHash: snap.id, ...snap.data() } as TableQrToken
+}
+
+/** Resolve a presented token to its table. Returns null for invalid/revoked/inactive. */
+export async function resolveTableToken(
+  tokenHash: string
+): Promise<{ table: DiningTable; token: TableQrToken } | null> {
+  const token = await getTableTokenByHash(tokenHash)
+  if (!token || token.revokedAt) return null
+  const table = await getTable(token.tableId)
+  if (!table || !table.active) return null
+  if (table.activeTokenHash !== token.tokenHash) return null // superseded
+  return { table, token }
+}
+
+// ---------------------------------------------------------------------------
+// Ordering config (tax, charges, general-ordering switch)
+// ---------------------------------------------------------------------------
+
+export interface OrderingConfig {
+  taxRateBps: number
+  serviceChargePaise: number
+  generalOrderingEnabled: boolean
+  currency: string
+  updatedAt: string
+}
+
+export async function getOrderingConfig(): Promise<OrderingConfig> {
+  const snap = await getDb().doc('restaurant/ordering').get()
+  if (!snap.exists) {
+    return {
+      taxRateBps: 500,
+      serviceChargePaise: 0,
+      generalOrderingEnabled: true,
+      currency: 'INR',
+      updatedAt: serverNow(),
+    }
+  }
+  const d = snap.data() as Partial<OrderingConfig>
+  return {
+    taxRateBps: d.taxRateBps ?? 500,
+    serviceChargePaise: d.serviceChargePaise ?? 0,
+    generalOrderingEnabled: d.generalOrderingEnabled ?? true,
+    currency: d.currency ?? 'INR',
+    updatedAt: d.updatedAt ?? serverNow(),
+  }
+}
+
+export async function saveOrderingConfig(data: {
+  taxRateBps: number
+  serviceChargePaise: number
+  generalOrderingEnabled: boolean
+}): Promise<void> {
+  await getDb()
+    .doc('restaurant/ordering')
+    .set({ ...data, currency: 'INR', updatedAt: serverNow() }, { merge: true })
+}
+
+// ---------------------------------------------------------------------------
+// Order menu catalog (separate from feedback `menuItems`)
+// ---------------------------------------------------------------------------
+
+export interface OrderMenuCategory {
+  id: string
+  restaurantId: string
+  name: string
+  position: number
+  active: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CustomizationChoice {
+  id: string
+  name: string
+  pricePaise: number
+}
+
+export interface CustomizationGroup {
+  id: string
+  name: string
+  type: 'single' | 'multi'
+  required: boolean
+  min: number
+  max: number
+  choices: CustomizationChoice[]
+}
+
+export interface OrderMenuItem {
+  id: string
+  restaurantId: string
+  categoryId: string | null
+  name: string
+  description?: string
+  imageUrl?: string
+  pricePaise: number
+  available: boolean
+  visible: boolean
+  veg: 'veg' | 'nonveg' | 'egg' | 'none'
+  featured: boolean
+  position: number
+  feedbackMenuItemId?: string | null
+  options: CustomizationGroup[]
+  createdAt: string
+  updatedAt: string
+}
+
+export async function getOrderMenuCategories(): Promise<OrderMenuCategory[]> {
+  const snap = await getDb().collection('orderMenuCategories').orderBy('position', 'asc').get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderMenuCategory)
+}
+
+export async function upsertOrderMenuCategory(data: {
+  id?: string
+  name: string
+  position?: number
+  active?: boolean
+}): Promise<OrderMenuCategory> {
+  const db = getDb()
+  if (data.id) {
+    await db.doc(`orderMenuCategories/${data.id}`).update(
+      stripUndefined({ name: data.name, position: data.position, active: data.active, updatedAt: serverNow() })
+    )
+    const snap = await db.doc(`orderMenuCategories/${data.id}`).get()
+    return { id: snap.id, ...snap.data() } as OrderMenuCategory
+  }
+  const ref = db.collection('orderMenuCategories').doc()
+  const now = serverNow()
+  const existing = await getOrderMenuCategories()
+  const cat: Omit<OrderMenuCategory, 'id'> = {
+    restaurantId: RESTAURANT_ID,
+    name: data.name,
+    position: data.position ?? existing.length + 1,
+    active: data.active ?? true,
+    createdAt: now,
+    updatedAt: now,
+  }
+  await ref.set(cat)
+  return { id: ref.id, ...cat }
+}
+
+export async function getOrderMenuItems(): Promise<OrderMenuItem[]> {
+  const snap = await getDb().collection('orderMenuItems').orderBy('position', 'asc').get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderMenuItem)
+}
+
+export async function getOrderMenuItem(id: string): Promise<OrderMenuItem | null> {
+  const snap = await getDb().doc(`orderMenuItems/${id}`).get()
+  if (!snap.exists) return null
+  return { id: snap.id, ...snap.data() } as OrderMenuItem
+}
+
+/** True when any historical order references the item (deletion protection). */
+export async function isMenuItemReferenced(itemId: string): Promise<boolean> {
+  const snap = await getDb().collection('orders').where('itemIds', 'array-contains', itemId).limit(1).get()
+  return !snap.empty
+}
+
+export async function deleteOrderMenuItem(id: string): Promise<void> {
+  await getDb().doc(`orderMenuItems/${id}`).delete()
+}
+
+export async function upsertOrderMenuItem(data: {
+  id?: string
+  categoryId?: string | null
+  name: string
+  description?: string
+  imageUrl?: string | null
+  pricePaise: number
+  available?: boolean
+  visible?: boolean
+  veg?: OrderMenuItem['veg']
+  featured?: boolean
+  position?: number
+  feedbackMenuItemId?: string | null
+  options?: CustomizationGroup[]
+}): Promise<OrderMenuItem> {
+  const db = getDb()
+  if (data.id) {
+    await db.doc(`orderMenuItems/${data.id}`).update(
+      stripUndefined({
+        categoryId: data.categoryId,
+        name: data.name,
+        description: data.description,
+        imageUrl: data.imageUrl,
+        pricePaise: data.pricePaise,
+        available: data.available,
+        visible: data.visible,
+        veg: data.veg,
+        featured: data.featured,
+        position: data.position,
+        feedbackMenuItemId: data.feedbackMenuItemId,
+        options: data.options,
+        updatedAt: serverNow(),
+      })
+    )
+    const snap = await db.doc(`orderMenuItems/${data.id}`).get()
+    return { id: snap.id, ...snap.data() } as OrderMenuItem
+  }
+  const ref = db.collection('orderMenuItems').doc()
+  const now = serverNow()
+  const existing = await getOrderMenuItems()
+  const item: Omit<OrderMenuItem, 'id'> = {
+    restaurantId: RESTAURANT_ID,
+    categoryId: data.categoryId ?? null,
+    name: data.name,
+    description: data.description || undefined,
+    imageUrl: data.imageUrl || undefined,
+    pricePaise: data.pricePaise,
+    available: data.available ?? true,
+    visible: data.visible ?? true,
+    veg: data.veg ?? 'none',
+    featured: data.featured ?? false,
+    position: data.position ?? existing.length + 1,
+    feedbackMenuItemId: data.feedbackMenuItemId || undefined,
+    options: data.options ?? [],
+    createdAt: now,
+    updatedAt: now,
+  }
+  await ref.set(stripUndefined({ ...item }))
+  return { id: ref.id, ...item } as OrderMenuItem
+}
+
+export async function setOrderMenuItemAvailability(id: string, available: boolean): Promise<void> {
+  await getDb().doc(`orderMenuItems/${id}`).update({ available, updatedAt: serverNow() })
+}
+
+export async function setOrderMenuItemVisibility(id: string, visible: boolean): Promise<void> {
+  await getDb().doc(`orderMenuItems/${id}`).update({ visible, updatedAt: serverNow() })
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+export type FulfilmentStatus = 'RECEIVED' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'SERVED' | 'CANCELLED'
+export type PaymentMethod = 'COUNTER'
+
+export interface OrderItemSnapshot {
+  itemId: string
+  itemName: string
+  unitPricePaise: number
+  quantity: number
+  options: Array<{
+    groupId: string
+    groupName: string
+    optionId: string
+    optionName: string
+    pricePaise: number
+  }>
+  lineTotalPaise: number
+}
+
+export interface Order {
+  id: string
+  restaurantId: string
+  orderNumber: string
+  tableId: string | null
+  tableLabel: string | null
+  customerName: string
+  customerPhone: string
+  items: OrderItemSnapshot[]
+  subtotalPaise: number
+  taxPaise: number
+  chargePaise: number
+  totalPaise: number
+  fulfilment: FulfilmentStatus
+  paymentStatus: string
+  paymentMethod: PaymentMethod
+  paidPaise: number
+  refundedPaise: number
+  notes?: string
+  idempotencyKey: string
+  accessTokenHash: string
+  /** Denormalized item IDs for reference-protection queries. */
+  itemIds: string[]
+  createdAt: string
+  updatedAt: string
+}
+
+export async function getOrderByIdempotencyKey(key: string): Promise<Order | null> {
+  const snap = await getDb().collection('orders').where('idempotencyKey', '==', key).limit(1).get()
+  if (snap.empty) return null
+  const d = snap.docs[0]
+  return { id: d.id, ...d.data() } as Order
+}
+
+export async function getOrder(id: string): Promise<Order | null> {
+  const snap = await getDb().doc(`orders/${id}`).get()
+  if (!snap.exists) return null
+  return { id: snap.id, ...snap.data() } as Order
+}
+
+export async function getOrders(limit = 500): Promise<Order[]> {
+  const snap = await getDb().collection('orders').orderBy('createdAt', 'desc').limit(limit).get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+}
+
+export async function getOrdersByTable(tableId: string, limit = 200): Promise<Order[]> {
+  const snap = await getDb()
+    .collection('orders')
+    .where('tableId', '==', tableId)
+    .orderBy('createdAt', 'desc')
+    .limit(limit)
+    .get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+}
+
+/** Allocate the next human-readable order number atomically. */
+export async function allocateOrderNumber(): Promise<{ seq: number; orderNumber: string }> {
+  const seq = await getDb().runTransaction(async (tx) => {
+    const ref = getDb().doc('counters/orderNumber')
+    const snap = await tx.get(ref)
+    const next = ((snap.exists ? (snap.data()?.seq as number) : 0) || 0) + 1
+    tx.set(ref, { seq: next, updatedAt: serverNow() }, { merge: true })
+    return next
+  })
+  return { seq, orderNumber: `ORD-${String(seq).padStart(6, '0')}` }
+}
+
+export async function createOrder(data: Omit<Order, 'id'>): Promise<Order> {
+  const ref = getDb().collection('orders').doc()
+  await ref.set(stripUndefined({ ...data }))
+  if (data.tableId) {
+    await getDb()
+      .doc(`diningTables/${data.tableId}`)
+      .update({ state: 'occupied', updatedAt: serverNow() })
+      .catch(() => {})
+  }
+  return { id: ref.id, ...data } as Order
+}
+
+/** Validated fulfilment transition inside a transaction + audit event. */
+export async function transitionOrderStatus(
+  orderId: string,
+  to: FulfilmentStatus,
+  actor: { uid: string; email?: string | null },
+  reason?: string
+): Promise<Order> {
+  const db = getDb()
+  const allowed: Record<string, string[]> = {
+    RECEIVED: ['ACCEPTED', 'CANCELLED'],
+    ACCEPTED: ['PREPARING', 'CANCELLED'],
+    PREPARING: ['READY', 'CANCELLED'],
+    READY: ['SERVED'],
+    SERVED: [],
+    CANCELLED: [],
+  }
+  const updated = await db.runTransaction(async (tx) => {
+    const ref = db.doc(`orders/${orderId}`)
+    const snap = await tx.get(ref)
+    if (!snap.exists) throw new Error('NOT_FOUND')
+    const order = { id: snap.id, ...snap.data() } as Order
+    if (!allowed[order.fulfilment]?.includes(to)) throw new Error('INVALID_TRANSITION')
+    tx.update(ref, { fulfilment: to, updatedAt: serverNow() })
+    const eventRef = db.collection('orderEvents').doc()
+    tx.set(eventRef, {
+      orderId,
+      restaurantId: RESTAURANT_ID,
+      type: 'STATUS',
+      actorUid: actor.uid,
+      actorEmail: actor.email || null,
+      prev: order.fulfilment,
+      next: to,
+      reason: reason || null,
+      createdAt: serverNow(),
+    })
+    return { ...order, fulfilment: to }
+  })
+
+  // Table state management: if order is served or cancelled, check if table has any remaining active orders
+  if ((to === 'SERVED' || to === 'CANCELLED') && updated.tableId) {
+    try {
+      const remainingSnap = await db
+        .collection('orders')
+        .where('tableId', '==', updated.tableId)
+        .get()
+      const hasActiveOrders = remainingSnap.docs.some((d) => {
+        if (d.id === orderId) return false
+        const f = d.data()?.fulfilment
+        return f && f !== 'SERVED' && f !== 'CANCELLED'
+      })
+      if (!hasActiveOrders) {
+        await db
+          .doc(`diningTables/${updated.tableId}`)
+          .update({ state: to === 'SERVED' ? 'cleaning' : 'available', updatedAt: serverNow() })
+          .catch(() => {})
+      }
+    } catch {
+      // Non-critical background state sync
+    }
+  }
+
+  return updated
+}
+
+/** Record a collection/refund inside a transaction. Prevents over-collection. */
+export async function recordPaymentEntry(data: {
+  orderId: string
+  kind: 'collection' | 'refund'
+  amountPaise: number
+  method: string
+  staffUid: string
+  staffEmail?: string | null
+  reference?: string
+}): Promise<Order> {
+  const db = getDb()
+  const updated = await db.runTransaction(async (tx) => {
+    const ref = db.doc(`orders/${data.orderId}`)
+    const snap = await tx.get(ref)
+    if (!snap.exists) throw new Error('NOT_FOUND')
+    const order = { id: snap.id, ...snap.data() } as Order
+    if (order.fulfilment === 'CANCELLED') throw new Error('ORDER_CANCELLED')
+
+    let paid = order.paidPaise
+    let refunded = order.refundedPaise
+    if (data.kind === 'collection') {
+      if (paid + data.amountPaise > order.totalPaise) throw new Error('OVER_COLLECTION')
+      paid += data.amountPaise
+    } else {
+      if (refunded + data.amountPaise > paid) throw new Error('REFUND_EXCEEDS_PAID')
+      refunded += data.amountPaise
+    }
+    // Derive payment status (refund status requires a recorded refund — enforced here).
+    let paymentStatus = 'UNPAID'
+    if (refunded >= paid && paid > 0) paymentStatus = 'REFUNDED'
+    else if (refunded > 0) paymentStatus = 'PARTIALLY_REFUNDED'
+    else if (paid >= order.totalPaise) paymentStatus = 'PAID'
+    else if (paid > 0) paymentStatus = 'PARTIALLY_PAID'
+
+    tx.update(ref, { paidPaise: paid, refundedPaise: refunded, paymentStatus, updatedAt: serverNow() })
+    const entryRef = db.collection('paymentEntries').doc()
+    tx.set(entryRef, {
+      orderId: data.orderId,
+      restaurantId: RESTAURANT_ID,
+      kind: data.kind,
+      amountPaise: data.amountPaise,
+      method: data.method,
+      staffUid: data.staffUid,
+      staffEmail: data.staffEmail || null,
+      reference: data.reference || null,
+      createdAt: serverNow(),
+    })
+    const eventRef = db.collection('orderEvents').doc()
+    tx.set(eventRef, {
+      orderId: data.orderId,
+      restaurantId: RESTAURANT_ID,
+      type: data.kind === 'collection' ? 'PAYMENT_COLLECTED' : 'REFUND_RECORDED',
+      actorUid: data.staffUid,
+      actorEmail: data.staffEmail || null,
+      prev: order.paymentStatus,
+      next: paymentStatus,
+      reason: data.reference || null,
+      createdAt: serverNow(),
+    })
+    return { ...order, paidPaise: paid, refundedPaise: refunded, paymentStatus }
+  })
+  return updated
+}
+
+export interface OrderEvent {
+  id: string
+  orderId: string
+  type: string
+  actorUid?: string
+  actorEmail?: string | null
+  prev?: string | null
+  next?: string | null
+  reason?: string | null
+  createdAt: string
+}
+
+export async function getOrderEvents(orderId: string): Promise<OrderEvent[]> {
+  const snap = await getDb()
+    .collection('orderEvents')
+    .where('orderId', '==', orderId)
+    .orderBy('createdAt', 'asc')
+    .get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderEvent)
+}
+
+export interface PaymentEntry {
+  id: string
+  orderId: string
+  kind: 'collection' | 'refund'
+  amountPaise: number
+  method: string
+  staffUid: string
+  staffEmail?: string | null
+  reference?: string | null
+  createdAt: string
+}
+
+export async function getPaymentEntries(orderId: string): Promise<PaymentEntry[]> {
+  const snap = await getDb()
+    .collection('paymentEntries')
+    .where('orderId', '==', orderId)
+    .orderBy('createdAt', 'asc')
+    .get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PaymentEntry)
+}
+
+export async function getRecentPaymentEntries(limit = 2000): Promise<PaymentEntry[]> {
+  const snap = await getDb().collection('paymentEntries').orderBy('createdAt', 'desc').limit(limit).get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PaymentEntry)
+}
+
+// ---------------------------------------------------------------------------
+// Service requests (call staff)
+// ---------------------------------------------------------------------------
+
+export interface ServiceRequest {
+  id: string
+  restaurantId: string
+  tableId: string
+  tableLabel: string
+  type: string
+  note?: string
+  status: 'OPEN' | 'ACK' | 'RESOLVED' | 'CANCELLED'
+  createdAt: string
+  updatedAt: string
+  resolvedAt?: string | null
+}
+
+export async function createServiceRequest(data: {
+  tableId: string
+  tableLabel: string
+  type: string
+  note?: string
+}): Promise<ServiceRequest> {
+  const ref = getDb().collection('serviceRequests').doc()
+  const now = serverNow()
+  const req: Omit<ServiceRequest, 'id'> = {
+    restaurantId: RESTAURANT_ID,
+    tableId: data.tableId,
+    tableLabel: data.tableLabel,
+    type: data.type,
+    note: data.note || undefined,
+    status: 'OPEN',
+    createdAt: now,
+    updatedAt: now,
+    resolvedAt: null,
+  }
+  await ref.set(stripUndefined({ ...req }))
+  return { id: ref.id, ...req } as ServiceRequest
+}
+
+export async function getServiceRequests(status?: string, limit = 200): Promise<ServiceRequest[]> {
+  let q = getDb().collection('serviceRequests').orderBy('createdAt', 'desc')
+  if (status) q = q.where('status', '==', status) as typeof q
+  const snap = await q.limit(limit).get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)
+}
+
+export async function updateServiceRequest(id: string, status: ServiceRequest['status']): Promise<void> {
+  const updates: Record<string, unknown> = { status, updatedAt: serverNow() }
+  if (status === 'RESOLVED' || status === 'CANCELLED') updates.resolvedAt = serverNow()
+  await getDb().doc(`serviceRequests/${id}`).update(updates)
+}

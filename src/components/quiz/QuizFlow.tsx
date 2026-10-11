@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import QuizProgressHeader from './QuizProgressHeader'
 import QuizNavigationControls from './QuizNavigationControls'
 import ReviewDraftCard from './ReviewDraftCard'
@@ -404,7 +405,7 @@ export default function QuizFlow({
               </div>
             </div>
 
-            {/* Start Button */}
+            {/* Actions: Review Option & Order Through Table Option */}
             <div className="pt-1 space-y-3">
               <button
                 type="button"
@@ -419,14 +420,24 @@ export default function QuizFlow({
                   </>
                 ) : (
                   <>
-                    Share Your Feedback
+                    <Star className="w-4 h-4 mr-2 fill-amber-300 text-amber-300" />
+                    Review &amp; Share Feedback
                     <ArrowRight className="w-4 h-4 ml-2 group-hover:translate-x-1 transition-transform" />
                   </>
                 )}
               </button>
 
+              <Link
+                href={`/order/${slug}`}
+                className="inline-flex items-center justify-center w-full h-12 rounded-xl bg-amber-50 hover:bg-amber-100/90 border border-amber-300 text-amber-950 font-bold transition-all duration-200 cursor-pointer text-sm active:scale-[0.98] px-4"
+              >
+                <Utensils className="w-4 h-4 mr-2 text-amber-700 shrink-0" />
+                <span>Order Food through Table</span>
+                <ArrowRight className="w-4 h-4 ml-auto text-amber-700/60" />
+              </Link>
+
               <p className="text-[11px] text-stone-400">
-                Your authentic feedback helps the chef and team serve you better.
+                Seated at a dining table? Tap above to browse menu or rate your meal.
               </p>
             </div>
           </div>

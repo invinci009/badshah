@@ -20,7 +20,7 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // 1. Bot filter for customer routes (cheapest check first)
-  if (pathname.startsWith('/r/') || pathname.startsWith('/api/public/')) {
+  if (pathname.startsWith('/r/') || pathname.startsWith('/order/') || pathname.startsWith('/api/public/')) {
     const botResponse = botFilterMiddleware(request)
     if (botResponse) return botResponse
   }
@@ -57,6 +57,7 @@ export async function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     '/r/:path*',
+    '/order/:path*',
     '/api/public/:path*',
     '/dashboard/:path*',
     '/api/dashboard/:path*',
