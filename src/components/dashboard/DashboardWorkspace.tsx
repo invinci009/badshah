@@ -138,18 +138,24 @@ export default function DashboardWorkspace({
       {/* Restaurant Header */}
       <div className="space-y-3 pb-3 border-b border-slate-800/80">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-          <div className="space-y-0.5">
-            <div className="flex items-center gap-2 flex-wrap">
-              <h1 className="text-xl sm:text-2xl lg:text-3xl font-extrabold tracking-tight text-white">
-                {business.name}
-              </h1>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                <Sparkles className="w-2.5 h-2.5" /> Live
-              </span>
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl overflow-hidden border border-amber-500/40 shadow-lg shadow-amber-500/10 shrink-0 bg-slate-900">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.png" alt={business.name} className="w-full h-full object-cover" />
             </div>
-            <p className="text-xs text-slate-400 truncate max-w-xl">
-              {business.location ? `${business.location} • ` : ''}Restaurant Management &amp; Analytics
-            </p>
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="text-xl sm:text-2xl lg:text-3xl font-extrabold tracking-tight text-white">
+                  {business.name}
+                </h1>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                  <Sparkles className="w-2.5 h-2.5" /> Live
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 truncate max-w-xl">
+                {business.location ? `${business.location} • ` : ''}Restaurant Management &amp; Analytics
+              </p>
+            </div>
           </div>
 
           {/* Quick Action Buttons for Mobile / Tablet */}

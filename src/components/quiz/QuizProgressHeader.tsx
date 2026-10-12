@@ -39,12 +39,15 @@ export default function QuizProgressHeader({
 
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-500 text-white flex items-center justify-center font-bold text-xs overflow-hidden shrink-0 shadow-sm border border-amber-300">
-              {logoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={logoUrl} alt={restaurantName} className="w-full h-full object-cover" />
-              ) : (
-                <Utensils className="w-4 h-4" />
-              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={logoUrl || '/logo.png'}
+                alt={restaurantName}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  e.currentTarget.src = '/logo.png'
+                }}
+              />
             </div>
             <div>
               <span className="text-sm font-bold text-stone-900 truncate block max-w-[180px] sm:max-w-xs">

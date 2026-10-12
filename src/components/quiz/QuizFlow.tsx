@@ -286,12 +286,15 @@ export default function QuizFlow({
             {/* Crest / Monogram Icon */}
             <div className="relative mx-auto w-20 h-20">
               <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-500 text-white flex items-center justify-center shadow-xl shadow-amber-600/25 overflow-hidden border-2 border-amber-200">
-                {logoUrl ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={logoUrl} alt={restaurantName} className="w-full h-full object-cover" />
-                ) : (
-                  <Utensils className="w-9 h-9" />
-                )}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={logoUrl || '/logo.png'}
+                  alt={restaurantName}
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.src = '/logo.png'
+                  }}
+                />
               </div>
               <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-white shadow-xs border border-stone-200 text-amber-600">
                 <Sparkles className="w-4 h-4 fill-amber-400" />

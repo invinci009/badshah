@@ -2,9 +2,9 @@ import type { MetadataRoute } from 'next'
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'PM Zaika Restaurant — Feedback & Reviews',
-    short_name: 'PM Zaika',
-    description: 'Instant QR customer feedback, smart AI reviews & live restaurant management dashboard for PM Zaika Restaurant, Patna',
+    name: 'Biryani Badshah — Royal Indian Dining & Ordering',
+    short_name: 'Biryani Badshah',
+    description: 'Instant QR customer feedback, smart AI reviews & live table ordering for Biryani Badshah, Patna',
     start_url: '/',
     scope: '/',
     display: 'standalone',

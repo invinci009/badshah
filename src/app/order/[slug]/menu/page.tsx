@@ -351,10 +351,22 @@ export default function OrderMenuPage() {
           <Link href={backHref} className="p-2 rounded-xl hover:bg-stone-100 transition-colors" aria-label="Back">
             <ArrowLeft className="w-4 h-4 text-stone-700" />
           </Link>
-          <div className="flex-1 min-w-0">
-            <h1 className="font-black text-base truncate flex items-center gap-1.5 text-stone-900">
-              <span>{restaurantName || 'Biryani Badshah'}</span>
-            </h1>
+          <div className="flex-1 min-w-0 flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg overflow-hidden border border-amber-300 shadow-xs shrink-0 bg-slate-900">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo.png"
+                alt="Biryani Badshah"
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none'
+                }}
+              />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h1 className="font-black text-base truncate flex items-center gap-1.5 text-stone-900">
+                <span>{restaurantName || 'Biryani Badshah'}</span>
+              </h1>
             {token ? (
               <p className="text-[11px] font-semibold text-amber-700 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 inline-block" />
@@ -371,6 +383,7 @@ export default function OrderMenuPage() {
                 <ChevronDown className="w-3 h-3 text-amber-700 shrink-0" />
               </button>
             )}
+            </div>
           </div>
           {contactPhone && (
             <a

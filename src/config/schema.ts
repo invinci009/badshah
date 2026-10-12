@@ -72,8 +72,8 @@ export const restaurantConfigSchema = z.object({
 
   // Branding
   branding: z.object({
-    logoUrl: z.string().url().optional(),
-    faviconUrl: z.string().url().optional(),
+    logoUrl: z.string().optional(),
+    faviconUrl: z.string().optional(),
     primaryColor: hexColorSchema,
     secondaryColor: hexColorSchema,
     accentColor: hexColorSchema.optional(),

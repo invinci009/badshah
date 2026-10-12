@@ -16,8 +16,8 @@
     "reviewUrl": "https://search.google.com/local/writereview?placeid=ChIJv4XCqyuo8jkRSKhDFGoClDo"
   },
   "branding": {
-    "logoUrl": "https://storage.googleapis.com/your-project.appspot.com/branding/logo.png",
-    "faviconUrl": "https://storage.googleapis.com/your-project.appspot.com/branding/favicon.ico",
+    "logoUrl": "/logo.png",
+    "faviconUrl": "/logo.png",
     "primaryColor": "#d97706",
     "secondaryColor": "#1e293b",
     "accentColor": "#f59e0b"

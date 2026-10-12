@@ -137,12 +137,15 @@ export default async function OrderPortalPage({ params, searchParams }: PortalPa
           {/* Restaurant Crest & Logo */}
           <div className="relative mx-auto w-20 h-20 sm:w-24 sm:h-24 animate-in fade-in zoom-in duration-500">
             <div className="w-20 h-20 sm:w-24 sm:h-24 mx-auto rounded-3xl bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-500 text-white flex items-center justify-center shadow-xl shadow-amber-600/25 overflow-hidden border-2 border-amber-200">
-              {logoUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={logoUrl} alt={restaurantName} className="w-full h-full object-cover" />
-              ) : (
-                <UtensilsCrossed className="w-10 h-10" />
-              )}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={logoUrl || '/logo.png'}
+                alt={restaurantName}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  e.currentTarget.src = '/logo.png'
+                }}
+              />
             </div>
             <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-white shadow-md border border-stone-200 text-amber-600">
               <Sparkles className="w-3.5 h-3.5 fill-amber-400" />
