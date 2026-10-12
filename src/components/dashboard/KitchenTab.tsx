@@ -117,16 +117,28 @@ export default function KitchenTab() {
   }, [beep])
 
   useEffect(() => {
-    // Deferred initial load: the fetch resolves asynchronously after mount.
-    const raf = requestAnimationFrame(() => load())
+    load()
+
+    // 10-second auto-sync interval
     const t = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         load()
       }
-    }, 35000)
+    }, 10000)
+
+    // Immediate sync when tab gains visibility or focus
+    const onVis = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        load()
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('focus', onVis)
+
     return () => {
-      cancelAnimationFrame(raf)
       clearInterval(t)
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('focus', onVis)
     }
   }, [load])
 
@@ -170,10 +182,17 @@ export default function KitchenTab() {
 
   return (
     <div className="space-y-4 animate-in fade-in duration-300">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-xl font-bold text-white flex items-center gap-2">
           <ChefHat className="w-5 h-5 text-amber-400" /> Kitchen Display
           <span className="text-xs font-medium text-slate-400">({orders.length} active)</span>
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+            <span className="relative flex h-1.5 w-1.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+            </span>
+            Live Auto-Sync
+          </span>
         </h2>
         <button
           type="button"

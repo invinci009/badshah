@@ -26,6 +26,8 @@ import {
   MessageSquare,
   Clock,
   Sparkles,
+  Volume2,
+  VolumeX,
 } from 'lucide-react'
 import { formatPaise, formatTableDisplay } from '@/lib/ordering/rules.mjs'
 
@@ -153,10 +155,55 @@ export default function OrdersTab({
   const [payRef, setPayRef] = useState('')
   const [payKind, setPayKind] = useState<'collection' | 'refund'>('collection')
 
-  // Notification message
+  // Notification message & live arrivals
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
-  const [newArrivals, setNewArrivals] = useState(0)
+  const [justArrivedCount, setJustArrivedCount] = useState(0)
+  const [soundEnabled, setSoundEnabled] = useState(true)
+  const audioCtxRef = useRef<AudioContext | null>(null)
   const prevIds = useRef<Set<string>>(new Set())
+  const newOrderIdsRef = useRef<Set<string>>(new Set())
+
+  const playChime = useCallback(() => {
+    if (!soundEnabled || typeof window === 'undefined') return
+    try {
+      if (!audioCtxRef.current) {
+        const AC =
+          window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+        if (AC) audioCtxRef.current = new AC()
+      }
+      const ctx = audioCtxRef.current
+      if (ctx) {
+        if (ctx.state === 'suspended') {
+          ctx.resume()
+        }
+        const now = ctx.currentTime
+        const osc1 = ctx.createOscillator()
+        const gain1 = ctx.createGain()
+        osc1.type = 'sine'
+        osc1.frequency.setValueAtTime(587.33, now)
+        gain1.gain.setValueAtTime(0.15, now)
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.3)
+        osc1.connect(gain1)
+        gain1.connect(ctx.destination)
+        osc1.start(now)
+        osc1.stop(now + 0.3)
+
+        const osc2 = ctx.createOscillator()
+        const gain2 = ctx.createGain()
+        osc2.type = 'sine'
+        osc2.frequency.setValueAtTime(880, now + 0.1)
+        gain2.gain.setValueAtTime(0.15, now + 0.1)
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.5)
+        osc2.connect(gain2)
+        gain2.connect(ctx.destination)
+        osc2.start(now + 0.1)
+        osc2.stop(now + 0.5)
+      }
+    } catch {
+      // audio unavailable
+    }
+  }, [soundEnabled])
 
   const fetchOrders = useCallback(
     async (silent = false) => {
@@ -177,8 +224,15 @@ export default function OrdersTab({
           if (prevIds.current.size > 0) {
             const fresh = data.filter(
               (o: OrderRow) => !prevIds.current.has(o.id) && o.fulfilment === 'RECEIVED'
-            ).length
-            if (fresh > 0) setNewArrivals((n) => n + fresh)
+            )
+            if (fresh.length > 0) {
+              fresh.forEach((o) => newOrderIdsRef.current.add(o.id))
+              setJustArrivedCount(fresh.length)
+              playChime()
+              setTimeout(() => {
+                setJustArrivedCount(0)
+              }, 5000)
+            }
           }
           prevIds.current = ids
           setOrders(data)
@@ -189,19 +243,32 @@ export default function OrdersTab({
         if (!silent) setLoading(false)
       }
     },
-    [search, tableFilter]
+    [search, tableFilter, playChime]
   )
 
   useEffect(() => {
-    const raf = requestAnimationFrame(() => fetchOrders())
+    fetchOrders()
+
+    // Real-time 10-second automatic polling when active
     const t = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         fetchOrders(true)
       }
-    }, 45000)
+    }, 10000)
+
+    // Immediate sync when tab gains visibility or focus
+    const onVis = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchOrders(true)
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    window.addEventListener('focus', onVis)
+
     return () => {
-      cancelAnimationFrame(raf)
       clearInterval(t)
+      document.removeEventListener('visibilitychange', onVis)
+      window.removeEventListener('focus', onVis)
     }
   }, [fetchOrders])
 
@@ -571,31 +638,45 @@ export default function OrdersTab({
       {/* Header bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+          <h2 className="text-xl font-bold text-white flex items-center gap-2 flex-wrap">
             <ClipboardList className="w-5 h-5 text-amber-400" /> Orders Management
-            {newArrivals > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  setNewArrivals(0)
-                  fetchOrders()
-                }}
-                className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500 text-white animate-pulse cursor-pointer"
-              >
-                {newArrivals} new — tap to refresh
-              </button>
+            {justArrivedCount > 0 ? (
+              <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500 text-white shadow-lg shadow-emerald-500/30 animate-pulse flex items-center gap-1.5">
+                🎉 {justArrivedCount} new order{justArrivedCount > 1 ? 's' : ''} auto-loaded
+              </span>
+            ) : (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5">
+                <span className="relative flex h-1.5 w-1.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                </span>
+                Live Auto-Sync
+              </span>
             )}
           </h2>
           <p className="text-xs text-slate-400">
-            Accept, update, prepare, and manage orders with 1-click status actions
+            Real-time orders queue automatically updates — no manual refresh needed
           </p>
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
+            onClick={() => setSoundEnabled((v) => !v)}
+            className={`p-2 rounded-xl border text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 ${
+              soundEnabled
+                ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25'
+                : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
+            }`}
+            title={soundEnabled ? 'Order sound alert enabled (tap to mute)' : 'Order sound muted (tap to enable)'}
+          >
+            {soundEnabled ? <Volume2 className="w-4 h-4 text-amber-400" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
+            <span className="text-[11px] hidden sm:inline">{soundEnabled ? 'Alerts ON' : 'Muted'}</span>
+          </button>
+          <button
+            type="button"
             onClick={() => fetchOrders()}
-            className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
-            title="Refresh Orders"
+            className="p-2 rounded-xl bg-slate-800 text-slate-300 hover:text-white cursor-pointer transition-colors"
+            title="Manual Refresh"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
@@ -696,10 +777,15 @@ export default function OrdersTab({
                       <span className="font-semibold text-slate-200">{o.customerName}</span>
                       <span className="text-slate-500">•</span>
                       <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 text-[11px] font-medium">
-                        Table: {o.tableLabel || 'Counter'}
+                        {o.tableLabel ? formatTableDisplay(o.tableLabel) : 'Counter'}
                       </span>
                       <span className="text-slate-500">•</span>
                       <span className="text-slate-400">{o.itemCount} items</span>
+                      {newOrderIdsRef.current.has(o.id) && (
+                        <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/40 animate-pulse">
+                          NEW
+                        </span>
+                      )}
                     </div>
                   </div>
 
