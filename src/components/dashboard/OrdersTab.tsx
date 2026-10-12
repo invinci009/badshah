@@ -167,6 +167,10 @@ export default function OrdersTab({
         if (search.trim()) params.set('q', search.trim())
         params.set('limit', '60')
         const res = await fetch(`/api/business/orders?${params.toString()}`)
+        if (res.status === 401) {
+          window.location.href = '/login'
+          return
+        }
         const data = await res.json()
         if (res.ok && Array.isArray(data)) {
           const ids = new Set(data.map((o: OrderRow) => o.id))

@@ -77,6 +77,10 @@ export default function KitchenTab() {
         fetch('/api/business/orders?status=active&limit=30'),
         fetch('/api/business/service-requests?status=OPEN'),
       ])
+      if (oRes.status === 401 || sRes.status === 401) {
+        window.location.href = '/login'
+        return
+      }
       const oData = await oRes.json()
       if (oRes.ok && Array.isArray(oData)) {
         const active = oData.filter((o: KOrder) => ['RECEIVED', 'ACCEPTED', 'PREPARING'].includes(o.fulfilment))
