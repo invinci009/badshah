@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getOrders, getActiveOrders, getTables, normalizeTableLabel } from '@/lib/firebase/ordering'
+import { getOrders, getActiveOrders, getOrdersByFulfilment, getTables, normalizeTableLabel, type FulfilmentStatus, type Order } from '@/lib/firebase/ordering'
 import { getSessionFromRequest } from '@/lib/firebase/auth'
 
 // GET /api/business/orders?status=&payment=&tableId=&q=&limit=
@@ -15,8 +15,14 @@ export async function GET(request: NextRequest) {
     const q = (searchParams.get('q') || '').toLowerCase().trim()
     const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '60', 10) || 60))
 
-    let orders = status === 'active' ? await getActiveOrders(limit) : await getOrders(limit)
-    if (status && status !== 'all' && status !== 'active') orders = orders.filter((o) => o.fulfilment === status)
+    let orders: Order[] = []
+    if (status === 'active') {
+      orders = await getActiveOrders(limit)
+    } else if (status && status !== 'all') {
+      orders = await getOrdersByFulfilment(status as FulfilmentStatus, limit)
+    } else {
+      orders = await getOrders(limit)
+    }
     if (payment && payment !== 'all') orders = orders.filter((o) => o.paymentStatus === payment)
     if (tableId) {
       const allTables = await getTables(true).catch(() => [])

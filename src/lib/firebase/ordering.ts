@@ -546,6 +546,17 @@ export async function getActiveOrders(limit = 50): Promise<Order[]> {
   })
 }
 
+/** Query orders by specific fulfilment status (e.g. SERVED, CANCELLED) with indexing. */
+export async function getOrdersByFulfilment(status: FulfilmentStatus, limit = 50): Promise<Order[]> {
+  const snap = await getDb()
+    .collection('orders')
+    .where('fulfilment', '==', status)
+    .limit(limit)
+    .get()
+  const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+  return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+}
+
 /** Efficient query for active orders at a specific table (reads max 5 docs instead of entire history). */
 export async function getActiveOrdersByTable(tableId: string): Promise<Order[]> {
   const snap = await getDb()

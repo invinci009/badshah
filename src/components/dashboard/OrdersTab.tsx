@@ -210,9 +210,10 @@ export default function OrdersTab({
       if (!silent) setLoading(true)
       try {
         const params = new URLSearchParams()
+        if (statusFilter !== 'all') params.set('status', statusFilter)
         if (tableFilter !== 'all') params.set('tableId', tableFilter)
         if (search.trim()) params.set('q', search.trim())
-        params.set('limit', '60')
+        params.set('limit', statusFilter === 'active' ? '30' : '60')
         const res = await fetch(`/api/business/orders?${params.toString()}`)
         if (res.status === 401) {
           window.location.href = '/login'
@@ -243,7 +244,7 @@ export default function OrdersTab({
         if (!silent) setLoading(false)
       }
     },
-    [search, tableFilter, playChime]
+    [search, tableFilter, statusFilter, playChime]
   )
 
   useEffect(() => {
