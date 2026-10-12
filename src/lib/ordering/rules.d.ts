@@ -23,3 +23,4 @@ export declare function outstandingPaise(
   paidPaise: number
 ): number;
 export declare function formatOrderNumber(seq: number): string;
+export declare function formatTableDisplay(label?: string | null): string;

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Loader2, AlertTriangle, ArrowLeft, CheckCircle2, ShieldCheck, Receipt, ShoppingBag, MapPin } from 'lucide-react'
-import { formatPaise, isValidIndianPhone } from '@/lib/ordering/rules.mjs'
+import { formatPaise, isValidIndianPhone, formatTableDisplay } from '@/lib/ordering/rules.mjs'
 import { loadCart, clearCart, type CartLine } from '@/lib/ordering/cart'
 
 interface QuoteItem {
@@ -250,7 +250,7 @@ export default function CheckoutPage() {
           </div>
           <h2 className="font-extrabold text-lg text-stone-900">Your Tray is Empty</h2>
           <p className="text-xs text-stone-500 leading-relaxed">
-            {tableLabel ? `Choose delicious Biryani & Mughlai specialties for Table ${tableLabel}.` : 'Select your favorite dishes to begin your order.'}
+            {tableLabel ? `Choose delicious Biryani & Mughlai specialties for ${formatTableDisplay(tableLabel)}.` : 'Select your favorite dishes to begin your order.'}
           </p>
           <Link href={menuHref} className="inline-block px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-sm font-bold shadow-md shadow-amber-600/20 transition-colors">
             Browse Menu
@@ -267,7 +267,7 @@ export default function CheckoutPage() {
           <Link href={menuHref} className="p-2 rounded-lg hover:bg-stone-100 transition-colors" aria-label="Back to menu">
             <ArrowLeft className="w-4 h-4" />
           </Link>
-          <h1 className="font-extrabold text-base">Checkout{tableLabel ? ` • Table ${tableLabel}` : ''}</h1>
+          <h1 className="font-extrabold text-base">Checkout{tableLabel ? ` • ${formatTableDisplay(tableLabel)}` : ''}</h1>
         </div>
       </header>
 
@@ -344,7 +344,7 @@ export default function CheckoutPage() {
                 </label>
                 {tableLabel && (
                   <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Table {tableLabel}
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" /> {formatTableDisplay(tableLabel)}
                   </span>
                 )}
               </div>
@@ -365,10 +365,10 @@ export default function CheckoutPage() {
                         key={t.id}
                         type="button"
                         disabled
-                        title={`Table ${t.label} is currently booked by another guest.`}
+                        title={`${formatTableDisplay(t.label)} is currently booked by another guest.`}
                         className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed flex items-center gap-1 opacity-60"
                       >
-                        <span>Table {t.label}</span>
+                        <span>{formatTableDisplay(t.label)}</span>
                         <span className="text-[10px] font-bold text-amber-700 bg-amber-100/90 px-1 py-0.2 rounded">
                           Booked
                         </span>
@@ -384,7 +384,7 @@ export default function CheckoutPage() {
                         disabled
                         className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed flex items-center gap-1 opacity-60"
                       >
-                        <span>Table {t.label}</span>
+                        <span>{formatTableDisplay(t.label)}</span>
                         <span className="text-[10px] font-bold text-stone-500 bg-stone-200 px-1 py-0.2 rounded">
                           Cleaning
                         </span>
@@ -410,7 +410,7 @@ export default function CheckoutPage() {
                           : 'bg-stone-50 text-stone-800 border border-stone-200 hover:border-amber-400 hover:bg-amber-50/50'
                       }`}
                     >
-                      <span>Table {t.label}</span>
+                      <span>{formatTableDisplay(t.label)}</span>
                       {isOwnActive && !isSelected && (
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                       )}

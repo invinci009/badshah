@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { Loader2, AlertTriangle, CheckCircle2, ChefHat, BellRing, Receipt, Phone, RefreshCw, XCircle, PartyPopper } from 'lucide-react'
-import { formatPaise } from '@/lib/ordering/rules.mjs'
+import { formatPaise, formatTableDisplay } from '@/lib/ordering/rules.mjs'
 
 const STATUS_META: Record<string, { label: string; hint: string }> = {
   RECEIVED: { label: 'Order Received', hint: 'Sent to the kitchen. Please wait for confirmation.' },
@@ -64,10 +64,17 @@ export default function OrderConfirmationPage() {
   const params = useParams<{ slug: string; orderId: string }>()
   const { slug, orderId } = params
 
-  const [accessToken] = useState<string | null>(() => readAccessToken(orderId))
+  const [mounted, setMounted] = useState(false)
+  const [accessToken, setAccessToken] = useState<string | null>(null)
   const [order, setOrder] = useState<TrackedOrder | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+
+  useEffect(() => {
+    setMounted(true)
+    const token = readAccessToken(orderId)
+    setAccessToken(token)
+  }, [orderId])
 
   const fetchOrder = useCallback(async (silent = false) => {
     if (!accessToken) return
@@ -102,6 +109,17 @@ export default function OrderConfirmationPage() {
       clearInterval(t)
     }
   }, [accessToken, fetchOrder, order?.fulfilment])
+
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-stone-50 flex items-center justify-center">
+        <div className="text-center space-y-3 text-stone-500">
+          <Loader2 className="w-8 h-8 mx-auto animate-spin text-amber-600" />
+          <p className="text-sm font-medium">Loading order…</p>
+        </div>
+      </div>
+    )
+  }
 
   if (!accessToken) {
     return (
@@ -160,7 +178,7 @@ export default function OrderConfirmationPage() {
           </div>
           <h1 className="text-2xl font-extrabold">{isServed ? 'Enjoy Your Meal!' : isCancelled ? 'Order Cancelled' : 'Order Placed!'}</h1>
           <p className="text-3xl font-black tracking-wide text-amber-700">{order.orderNumber}</p>
-          {order.tableLabel && <p className="text-sm font-bold text-stone-600">Table {order.tableLabel}</p>}
+          {order.tableLabel && <p className="text-sm font-bold text-stone-600">{formatTableDisplay(order.tableLabel)}</p>}
 
           <div className={`p-4 rounded-2xl border flex items-center gap-3 text-left ${isCancelled ? 'bg-rose-50 border-rose-200' : 'bg-amber-50 border-amber-200'}`}>
             {isCancelled ? <XCircle className="w-5 h-5 text-rose-600 shrink-0" /> : <ChefHat className="w-5 h-5 text-amber-700 shrink-0" />}
@@ -224,7 +242,7 @@ export default function OrderConfirmationPage() {
             href={`/order/${slug}/menu?table=${encodeURIComponent(order.tableLabel || '')}`}
             className="w-full h-12 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-colors shadow-sm cursor-pointer"
           >
-            <ChefHat className="w-4 h-4" /> Order More Dishes (Table {order.tableLabel || 'Dine-in'})
+            <ChefHat className="w-4 h-4" /> Order More Dishes ({order.tableLabel ? formatTableDisplay(order.tableLabel) : 'Dine-in'})
           </Link>
           <div className="grid grid-cols-2 gap-2">
             <Link

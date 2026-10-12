@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChefHat, Volume2, VolumeX, Loader2, BellRing, Check } from 'lucide-react'
+import { formatTableDisplay } from '@/lib/ordering/rules.mjs'
 
 interface KOrder {
   id: string
@@ -195,7 +196,7 @@ export default function KitchenTab() {
           <p className="text-xs font-bold text-sky-300 flex items-center gap-1.5"><BellRing className="w-4 h-4" /> Staff calls ({requests.length})</p>
           {requests.map((r) => (
             <div key={r.id} className="flex items-center justify-between text-xs text-sky-200 gap-2">
-              <span>Table {r.tableLabel} — {r.type}{r.note ? `: ${r.note}` : ''}</span>
+              <span>{formatTableDisplay(r.tableLabel)} — {r.type}{r.note ? `: ${r.note}` : ''}</span>
               <div className="flex gap-1.5 shrink-0">
                 <button type="button" onClick={() => resolveReq(r.id, 'ACK')} className="px-2 py-1 rounded-lg bg-sky-600 text-white font-bold cursor-pointer">Ack</button>
                 <button type="button" onClick={() => resolveReq(r.id, 'RESOLVED')} className="px-2 py-1 rounded-lg bg-emerald-600 text-white font-bold cursor-pointer">Done</button>
@@ -221,7 +222,7 @@ export default function KitchenTab() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-2xl font-black text-white">{o.orderNumber}</p>
-                    <p className="text-xs text-slate-300 font-semibold">Table {o.tableLabel || 'Counter'} • {age}m {overdue && <span className="text-rose-400 font-bold">OVERDUE</span>}</p>
+                    <p className="text-xs text-slate-300 font-semibold">{o.tableLabel ? formatTableDisplay(o.tableLabel) : 'Counter'} • {age}m {overdue && <span className="text-rose-400 font-bold">OVERDUE</span>}</p>
                   </div>
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30">{o.fulfilment}</span>
                 </div>

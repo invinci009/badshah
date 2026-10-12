@@ -235,6 +235,20 @@ describe('table anti-collision & cart isolation', () => {
     // Different cases of same table map to identical storage key
     assert.equal(cartKey('biryani-badshah', 'Table 1'), cartKey('biryani-badshah', 'table 1'))
   })
+
+  it('formats table labels cleanly without duplicate Table prefixes', async () => {
+    const { formatTableDisplay } = await import('../src/lib/ordering/rules.mjs')
+    assert.equal(formatTableDisplay('Table 6'), 'Table 6')
+    assert.equal(formatTableDisplay('Table Table 6'), 'Table 6')
+    assert.equal(formatTableDisplay('table table 6'), 'Table 6')
+    assert.equal(formatTableDisplay('6'), 'Table 6')
+    assert.equal(formatTableDisplay('12'), 'Table 12')
+    assert.equal(formatTableDisplay('Counter'), 'Counter')
+    assert.equal(formatTableDisplay('Takeaway'), 'Takeaway')
+    assert.equal(formatTableDisplay('Bar 2'), 'Bar 2')
+    assert.equal(formatTableDisplay(''), 'Dining Table')
+    assert.equal(formatTableDisplay(null), 'Dining Table')
+  })
 })
 
 

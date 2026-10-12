@@ -30,7 +30,7 @@ import {
   ChevronDown,
   CheckCircle2,
 } from 'lucide-react'
-import { formatPaise } from '@/lib/ordering/rules.mjs'
+import { formatPaise, formatTableDisplay } from '@/lib/ordering/rules.mjs'
 import { loadCart, saveCart, cartLineKey, type CartLine, type CartSelection } from '@/lib/ordering/cart'
 
 interface MenuOption {
@@ -369,7 +369,7 @@ export default function OrderMenuPage() {
             {token ? (
               <p className="text-[11px] font-semibold text-amber-700 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 inline-block" />
-                Table {tableLabel} • Dine-in Ordering
+                {formatTableDisplay(tableLabel)} • Dine-in Ordering
               </p>
             ) : (
               <button
@@ -378,7 +378,7 @@ export default function OrderMenuPage() {
                 className="mt-0.5 inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-100/80 hover:bg-amber-200/80 border border-amber-300 text-[11px] font-bold text-amber-950 cursor-pointer transition-all shadow-xs active:scale-95"
               >
                 <MapPin className="w-3 h-3 text-amber-600 shrink-0" />
-                <span>{tableLabel ? `Table ${tableLabel}` : 'Choose Table'}</span>
+                <span>{tableLabel ? formatTableDisplay(tableLabel) : 'Choose Table'}</span>
                 <ChevronDown className="w-3 h-3 text-amber-700 shrink-0" />
               </button>
             )}
@@ -558,7 +558,7 @@ export default function OrderMenuPage() {
               <div>
                 <h2 className="font-black text-lg text-stone-900">Your Tray</h2>
                 <p className="text-xs text-amber-700 font-semibold">
-                  {tableLabel ? `Table ${tableLabel} • Dine-in` : 'Dine-in Order'}
+                  {tableLabel ? `${formatTableDisplay(tableLabel)} • Dine-in` : 'Dine-in Order'}
                 </p>
               </div>
               <button
@@ -831,7 +831,7 @@ export default function OrderMenuPage() {
                   Call Staff Assistance
                 </h2>
                 <p className="text-[11px] text-stone-500">
-                  {tableLabel ? `Table ${tableLabel}` : 'Dine-in assistance'}
+                  {tableLabel ? formatTableDisplay(tableLabel) : 'Dine-in assistance'}
                 </p>
               </div>
               <button
@@ -914,7 +914,7 @@ export default function OrderMenuPage() {
                   Select Your Table
                 </h2>
                 <p className="text-[11px] text-stone-500">
-                  {tableLabel ? `Currently: Table ${tableLabel}` : 'Choose your seated table'}
+                  {tableLabel ? `Currently: ${formatTableDisplay(tableLabel)}` : 'Choose your seated table'}
                 </p>
               </div>
               <button
@@ -943,10 +943,10 @@ export default function OrderMenuPage() {
                       key={t.id}
                       type="button"
                       disabled
-                      title={`Table ${t.label} is currently booked by another guest.`}
+                      title={`${formatTableDisplay(t.label)} is currently booked by another guest.`}
                       className="px-3 py-2 rounded-xl text-xs font-semibold bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed opacity-60 flex items-center gap-1.5"
                     >
-                      <span>Table {t.label}</span>
+                      <span>{formatTableDisplay(t.label)}</span>
                       <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded">
                         Booked
                       </span>
@@ -962,7 +962,7 @@ export default function OrderMenuPage() {
                       disabled
                       className="px-3 py-2 rounded-xl text-xs font-semibold bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed opacity-60 flex items-center gap-1.5"
                     >
-                      <span>Table {t.label}</span>
+                      <span>{formatTableDisplay(t.label)}</span>
                       <span className="text-[10px] font-bold text-stone-500 bg-stone-200 px-1.5 py-0.2 rounded">
                         Cleaning
                       </span>
@@ -983,7 +983,7 @@ export default function OrderMenuPage() {
                         : 'bg-stone-50 text-stone-800 border border-stone-200 hover:border-amber-400 hover:bg-amber-50/60'
                     }`}
                   >
-                    <span>Table {t.label}</span>
+                    <span>{formatTableDisplay(t.label)}</span>
                     {isOwnActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
                     {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
                   </button>

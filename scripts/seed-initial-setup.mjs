@@ -77,7 +77,7 @@ async function main() {
     for (let i = 1; i <= 10; i++) {
       await db.collection('diningTables').add({
         restaurantId: 'default',
-        label: `Table ${i}`,
+        label: String(i),
         description: `Dine-in Table ${i}`,
         active: true,
         state: 'available',

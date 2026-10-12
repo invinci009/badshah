@@ -129,3 +129,24 @@ export function outstandingPaise(totalPaise, paidPaise) {
 export function formatOrderNumber(seq) {
   return `ORD-${String(seq).padStart(6, '0')}`
 }
+
+/**
+ * Format a table label cleanly, eliminating duplicate prefixes (e.g. "Table Table 6" -> "Table 6").
+ */
+export function formatTableDisplay(label) {
+  if (typeof label !== 'string' || !label.trim()) return 'Dining Table'
+  const trimmed = label.trim()
+  if (/^table\b/i.test(trimmed)) {
+    const cleanNumber = trimmed.replace(/^(table\s*)+/i, '').trim()
+    return cleanNumber ? `Table ${cleanNumber}` : 'Dining Table'
+  }
+  if (/^t[-#]?\s*\d+$/i.test(trimmed)) {
+    const num = trimmed.replace(/^t[-#]?\s*/i, '')
+    return `Table ${num}`
+  }
+  if (/^\d+$/.test(trimmed)) {
+    return `Table ${trimmed}`
+  }
+  return trimmed
+}
+

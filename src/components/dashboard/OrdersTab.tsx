@@ -27,7 +27,7 @@ import {
   Clock,
   Sparkles,
 } from 'lucide-react'
-import { formatPaise } from '@/lib/ordering/rules.mjs'
+import { formatPaise, formatTableDisplay } from '@/lib/ordering/rules.mjs'
 
 interface OrderRow {
   id: string
@@ -653,7 +653,7 @@ export default function OrdersTab({
           <option value="all">All dining tables</option>
           {tables.map((t) => (
             <option key={t.id} value={t.id}>
-              Table {t.label}
+              {formatTableDisplay(t.label)}
             </option>
           ))}
         </select>
@@ -934,7 +934,7 @@ export default function OrdersTab({
                         <option value="">Counter / Takeaway</option>
                         {tables.map((t) => (
                           <option key={t.id} value={t.id}>
-                            Table {t.label}
+                            {formatTableDisplay(t.label)}
                           </option>
                         ))}
                       </select>
@@ -1042,7 +1042,7 @@ export default function OrdersTab({
                     <div className="flex justify-between items-center">
                       <span className="text-slate-400 text-xs">Dining Table</span>
                       <span className="text-amber-300 font-semibold px-2 py-0.5 rounded bg-slate-900 text-xs">
-                        {detail.order.tableLabel ? `Table ${detail.order.tableLabel}` : 'Counter'}
+                        {detail.order.tableLabel ? formatTableDisplay(detail.order.tableLabel) : 'Counter'}
                       </span>
                     </div>
                     <div className="flex justify-between items-center">
