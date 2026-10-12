@@ -640,7 +640,7 @@ export default function OrderMenuTab({ onRefresh }: { onRefresh: () => void }) {
                     {item.imageUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={item.imageUrl}
+                        src={normalizeImageUrl(item.imageUrl) || item.imageUrl}
                         alt={item.name}
                         referrerPolicy="no-referrer"
                         className="w-full h-full object-cover"

@@ -32,6 +32,7 @@ import {
 } from 'lucide-react'
 import { formatPaise, formatTableDisplay } from '@/lib/ordering/rules.mjs'
 import { loadCart, saveCart, cartLineKey, getActiveOrderSession, type CartLine, type CartSelection, type ActiveSession } from '@/lib/ordering/cart'
+import { normalizeImageUrl } from '@/lib/ordering/validation'
 
 interface MenuOption {
   id: string
@@ -1071,8 +1072,9 @@ function ItemCard({ item, onAdd, justAdded }: { item: MenuItem; onAdd: () => voi
         {item.imageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={item.imageUrl}
+            src={normalizeImageUrl(item.imageUrl) || item.imageUrl}
             alt={item.name}
+            referrerPolicy="no-referrer"
             className="w-20 h-20 rounded-xl object-cover bg-stone-100"
             loading="lazy"
             onError={(e) => {
