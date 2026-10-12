@@ -1087,18 +1087,26 @@ function ItemCard({ item, onAdd, justAdded }: { item: MenuItem; onAdd: () => voi
             alt={item.name}
             className="w-20 h-20 rounded-xl object-cover bg-stone-100"
             loading="lazy"
+            onError={(e) => {
+              e.currentTarget.style.display = 'none'
+              const fallback = e.currentTarget.nextElementSibling as HTMLElement | null
+              if (fallback) fallback.style.display = 'flex'
+            }}
           />
-        ) : (
-          <div className="w-20 h-20 rounded-xl bg-stone-50 border border-stone-200/60 flex items-center justify-center text-stone-300">
-            {item.veg === 'veg' ? (
-              <Leaf className="w-6 h-6 text-emerald-500/50" />
-            ) : item.veg === 'egg' ? (
-              <Egg className="w-6 h-6 text-amber-500/50" />
-            ) : (
-              <Drumstick className="w-6 h-6 text-amber-700/50" />
-            )}
-          </div>
-        )}
+        ) : null}
+        <div
+          className={`w-20 h-20 rounded-xl bg-stone-50 border border-stone-200/60 items-center justify-center text-stone-300 ${
+            item.imageUrl ? 'hidden' : 'flex'
+          }`}
+        >
+          {item.veg === 'veg' ? (
+            <Leaf className="w-6 h-6 text-emerald-500/50" />
+          ) : item.veg === 'egg' ? (
+            <Egg className="w-6 h-6 text-amber-500/50" />
+          ) : (
+            <Drumstick className="w-6 h-6 text-amber-700/50" />
+          )}
+        </div>
 
         <button
           type="button"

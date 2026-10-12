@@ -60,12 +60,44 @@ const customizationGroupSchema = z.object({
   choices: customizationChoiceSchema.array().min(1).max(30),
 })
 
+/**
+ * Convert Google Drive share links, Dropbox, and cloud storage URLs into direct image stream URLs.
+ */
+export function normalizeImageUrl(url: string | null | undefined): string | null {
+  if (!url) return null
+  const trimmed = url.trim()
+  if (!trimmed) return null
+
+  // Google Drive file link: /file/d/{id}/... or ?id={id}
+  const driveFileMatch = trimmed.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/)
+  if (driveFileMatch && driveFileMatch[1]) {
+    return `https://lh3.googleusercontent.com/d/${driveFileMatch[1]}`
+  }
+
+  const driveIdMatch = trimmed.match(/drive\.google\.com\/.*[?&]id=([a-zA-Z0-9_-]+)/)
+  if (driveIdMatch && driveIdMatch[1]) {
+    return `https://lh3.googleusercontent.com/d/${driveIdMatch[1]}`
+  }
+
+  // Dropbox share links: replace dl=0 with raw=1 for direct image delivery
+  if (trimmed.includes('dropbox.com') && trimmed.includes('dl=0')) {
+    return trimmed.replace('dl=0', 'raw=1')
+  }
+
+  return trimmed
+}
+
 export const orderMenuItemUpsertSchema = z.object({
   id: z.string().min(1).optional(),
   categoryId: z.string().min(1).nullable().optional(),
   name: z.string().min(1).max(120),
   description: z.string().max(500).optional(),
-  imageUrl: z.string().url().max(2000).or(z.literal('')).nullable().optional(),
+  imageUrl: z
+    .string()
+    .max(2000)
+    .nullable()
+    .optional()
+    .transform((val) => normalizeImageUrl(val)),
   pricePaise: z.number().int().min(0).max(10000000),
   available: z.boolean().optional(),
   visible: z.boolean().optional(),

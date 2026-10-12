@@ -21,6 +21,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 import { formatPaise } from '@/lib/ordering/rules.mjs'
+import { normalizeImageUrl } from '@/lib/ordering/validation'
 
 interface Category {
   id: string
@@ -516,13 +517,25 @@ export default function OrderMenuTab({ onRefresh }: { onRefresh: () => void }) {
                   className="hidden"
                 />
 
-                <div className="flex items-center gap-2 pt-1">
+                <div className="flex flex-col gap-1.5 pt-1">
                   <Input
                     value={fImageUrl}
-                    onChange={(e) => setFImageUrl(e.target.value)}
-                    placeholder="Or paste external image URL directly…"
+                    onChange={(e) => {
+                      const val = e.target.value
+                      const norm = normalizeImageUrl(val)
+                      setFImageUrl(norm || val)
+                      if (uploadError) setUploadError(null)
+                    }}
+                    onBlur={(e) => {
+                      const norm = normalizeImageUrl(e.target.value)
+                      if (norm) setFImageUrl(norm)
+                    }}
+                    placeholder="Or paste external image / Google Drive link…"
                     className="bg-slate-950/60 border-slate-800 text-slate-300 h-8 text-[11px]"
                   />
+                  <p className="text-[10px] text-slate-500">
+                    Supports direct image URLs and Google Drive links (ensure link sharing is set to &quot;Anyone with the link&quot;).
+                  </p>
                 </div>
               </div>
 
