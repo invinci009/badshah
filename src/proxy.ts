@@ -25,8 +25,8 @@ export async function proxy(request: NextRequest) {
     if (botResponse) return botResponse
   }
 
-  // 2. Rate limiting for public API routes
-  if (pathname.startsWith('/api/public/')) {
+  // 2. Rate limiting for public and business API routes
+  if (pathname.startsWith('/api/public/') || pathname.startsWith('/api/business/')) {
     const rateLimitResponse = await rateLimitMiddleware(request)
     if (rateLimitResponse) return rateLimitResponse
   }
@@ -59,6 +59,7 @@ export const config = {
     '/r/:path*',
     '/order/:path*',
     '/api/public/:path*',
+    '/api/business/:path*',
     '/dashboard/:path*',
     '/api/dashboard/:path*',
   ],
