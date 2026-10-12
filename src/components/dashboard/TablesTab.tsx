@@ -120,6 +120,10 @@ export default function TablesTab({ tables, portalSlug, onRefresh }: TablesTabPr
   const handleCycleState = async (t: TableItem) => {
     const order = ['available', 'occupied', 'cleaning'] as const
     const next = order[(order.indexOf(t.state as (typeof order)[number]) + 1) % order.length] ?? 'available'
+    handleSetState(t, next)
+  }
+
+  const handleSetState = async (t: TableItem, next: 'available' | 'occupied' | 'cleaning') => {
     setBusyId(t.id)
     try {
       await fetch('/api/business/tables', {
@@ -267,12 +271,22 @@ export default function TablesTab({ tables, portalSlug, onRefresh }: TablesTabPr
               <CardHeader className="p-4 pb-3 border-b border-slate-800/80">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <CardTitle className="text-base font-bold text-white">Table {t.label}</CardTitle>
-                    <CardDescription className="text-xs text-slate-400">
-                      {t.active ? 'Active' : 'Deactivated'} • State:{' '}
-                      <button type="button" onClick={() => handleCycleState(t)} className="text-amber-400 hover:underline font-semibold" title="Tap to cycle available → occupied → cleaning">
-                        {t.state}
-                      </button>
+                    <CardTitle className="text-base font-bold text-white flex items-center gap-2">
+                      <span>Table {t.label}</span>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                          t.state === 'occupied'
+                            ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                            : t.state === 'cleaning'
+                            ? 'bg-sky-500/20 text-sky-400 border border-sky-500/40'
+                            : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                        }`}
+                      >
+                        {t.state === 'occupied' ? 'Booked' : t.state === 'cleaning' ? 'Cleaning' : 'Available'}
+                      </span>
+                    </CardTitle>
+                    <CardDescription className="text-xs text-slate-400 mt-1">
+                      {t.active ? 'Active for guests' : 'Paused / Deactivated'}
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -302,6 +316,43 @@ export default function TablesTab({ tables, portalSlug, onRefresh }: TablesTabPr
                 </div>
               </CardHeader>
               <CardContent className="p-4 space-y-3">
+                {/* Table State Management & One-Click Free Table */}
+                <div className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2">
+                  <div className="flex items-center justify-between text-[11px] text-slate-400 font-semibold">
+                    <span>Table Status:</span>
+                    {t.state !== 'available' && (
+                      <button
+                        type="button"
+                        onClick={() => handleSetState(t, 'available')}
+                        disabled={busyId === t.id}
+                        className="text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer"
+                      >
+                        Free Up Table
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(['available', 'occupied', 'cleaning'] as const).map((st) => (
+                      <button
+                        key={st}
+                        type="button"
+                        onClick={() => handleSetState(t, st)}
+                        disabled={busyId === t.id || t.state === st}
+                        className={`py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                          t.state === st
+                            ? st === 'occupied'
+                              ? 'bg-amber-500 text-stone-950 shadow-xs'
+                              : st === 'cleaning'
+                              ? 'bg-sky-500 text-stone-950 shadow-xs'
+                              : 'bg-emerald-500 text-stone-950 shadow-xs'
+                            : 'bg-slate-800/70 text-slate-400 hover:text-white hover:bg-slate-800'
+                        }`}
+                      >
+                        {st === 'available' ? 'Available' : st === 'occupied' ? 'Occupied' : 'Cleaning'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 {t.activeTokenHash ? (
                   <div className="p-3 rounded-2xl bg-white flex items-center justify-center max-w-[180px] mx-auto">
                     {/* eslint-disable-next-line @next/next/no-img-element */}

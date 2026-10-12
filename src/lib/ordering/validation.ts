@@ -108,6 +108,8 @@ export const orderCreateSchema = z.object({
   idempotencyKey: z.string().uuid(),
   clientTotalPaise: z.number().int().min(0).max(100000000).optional(),
   confirmUpdatedTotal: z.boolean().optional(),
+  existingOrderId: z.string().min(1).max(100).optional(),
+  activeOrderAccessToken: z.string().min(1).max(200).optional(),
   items: orderLineSchema.array().min(1).max(30),
 })
 

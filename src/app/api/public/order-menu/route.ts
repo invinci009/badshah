@@ -27,12 +27,12 @@ export async function GET(request: NextRequest) {
     }
 
     const tableParam = searchParams.get('table')
-    let table: { id: string; label: string } | null = null
+    let table: { id: string; label: string; state?: string } | null = null
     if (token) {
       const resolved = await resolveTableToken(hashToken(token))
       if (!resolved && !tableParam) return NextResponse.json({ error: 'Table code expired or revoked' }, { status: 410 })
       if (resolved) {
-        table = { id: resolved.table.id, label: resolved.table.label }
+        table = { id: resolved.table.id, label: resolved.table.label, state: resolved.table.state || 'available' }
       }
     }
     if (!table && tableParam) {
@@ -42,9 +42,9 @@ export async function GET(request: NextRequest) {
         if (!matched.active) {
           return NextResponse.json({ error: `Table "${matched.label}" is currently inactive.` }, { status: 403 })
         }
-        table = { id: matched.id, label: matched.label }
+        table = { id: matched.id, label: matched.label, state: matched.state || 'available' }
       } else {
-        table = { id: tableParam, label: tableParam }
+        table = { id: tableParam, label: tableParam, state: 'available' }
       }
     }
     if (!table && !token) {
@@ -68,7 +68,11 @@ export async function GET(request: NextRequest) {
         logoUrl: settings?.branding?.logoUrl || config.branding.logoUrl || null,
         contactPhone: settings?.contact?.phone || config.contact.phone || null,
         table,
-        tables: diningTables.filter((t) => t.active).map((t) => ({ id: t.id, label: t.label })),
+        tables: diningTables.filter((t) => t.active).map((t) => ({
+          id: t.id,
+          label: t.label,
+          state: t.state || 'available',
+        })),
         taxRateBps: ordering.taxRateBps,
         serviceChargePaise: ordering.serviceChargePaise,
         currency: 'INR',

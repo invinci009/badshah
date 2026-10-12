@@ -27,7 +27,12 @@ export default function CheckoutPage() {
   const [taxRateBps, setTaxRateBps] = useState(500)
   const [chargePaise, setChargePaise] = useState(0)
   const [tableLabel, setTableLabel] = useState<string | null>(tableParam || null)
-  const [availableTables, setAvailableTables] = useState<Array<{ id: string; label: string }>>([])
+  const [availableTables, setAvailableTables] = useState<Array<{ id: string; label: string; state?: string }>>([])
+  const [activeSession, setActiveSession] = useState<{
+    orderId: string
+    accessToken?: string
+    tableLabel: string
+  } | null>(null)
   const [contactPhone, setContactPhone] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -51,6 +56,18 @@ export default function CheckoutPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [priceConflict, setPriceConflict] = useState<{ quote: { totalPaise: number } } | null>(null)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(`rp_active_order_${slug}`)
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (parsed?.tableLabel) setActiveSession(parsed)
+        }
+      } catch {}
+    }
+  }, [slug])
 
   useEffect(() => {
     const q = new URLSearchParams()
@@ -114,6 +131,15 @@ export default function CheckoutPage() {
         idemKey = crypto.randomUUID()
         sessionStorage.setItem(`rp_idem_${slug}`, idemKey)
       }
+
+      // Check if this is an add-on order for the diner's active table
+      let existingOrderId: string | undefined
+      let activeOrderAccessToken: string | undefined
+      if (activeSession && activeSession.tableLabel === tableLabel) {
+        existingOrderId = activeSession.orderId
+        activeOrderAccessToken = activeSession.accessToken
+      }
+
       const res = await fetch('/api/public/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -127,6 +153,8 @@ export default function CheckoutPage() {
           idempotencyKey: idemKey,
           clientTotalPaise: preview.total,
           confirmUpdatedTotal,
+          existingOrderId,
+          activeOrderAccessToken,
           items: cart.map((l) => ({ itemId: l.itemId, quantity: l.quantity, selections: l.selections })),
         }),
       })
@@ -136,9 +164,38 @@ export default function CheckoutPage() {
         setSubmitting(false)
         return
       }
+      if (res.status === 409 && (data.code === 'TABLE_OCCUPIED' || data.code === 'TABLE_CLEANING')) {
+        setSubmitError(data.error || 'This table is currently occupied. Please choose an open table below.')
+        setSubmitting(false)
+        // Refresh menu/tables to show current open tables
+        fetch(`/api/public/order-menu?slug=${encodeURIComponent(slug)}`)
+          .then((r) => r.json())
+          .then((d) => {
+            if (d.tables) setAvailableTables(d.tables)
+          })
+          .catch(() => {})
+        return
+      }
       if (!res.ok) throw new Error(data.error || 'Could not place order')
       sessionStorage.removeItem(`rp_idem_${slug}`)
       clearCart(slug, tableLabel)
+
+      // Store active table booking in localStorage so the diner is recognized across all pages
+      try {
+        localStorage.setItem(
+          `rp_active_order_${slug}`,
+          JSON.stringify({
+            orderId: data.orderId,
+            orderNumber: data.orderNumber,
+            accessToken: data.accessToken,
+            tableLabel: data.tableLabel || tableLabel,
+            customerPhone: phone.trim(),
+            customerName: name.trim(),
+            createdAt: new Date().toISOString(),
+          })
+        )
+      } catch {}
+
       const confirmationParams = new URLSearchParams()
       confirmationParams.set('accessToken', data.accessToken)
       if (token) confirmationParams.set('token', token)
@@ -298,6 +355,43 @@ export default function CheckoutPage() {
               <div className="flex flex-wrap gap-2 pt-0.5">
                 {availableTables.map((t) => {
                   const isSelected = tableLabel === t.label
+                  const isOwnActive = activeSession?.tableLabel === t.label
+                  const isOccupied = t.state === 'occupied' && !isOwnActive
+                  const isCleaning = t.state === 'cleaning'
+
+                  if (isOccupied) {
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        disabled
+                        title={`Table ${t.label} is currently booked by another guest.`}
+                        className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed flex items-center gap-1 opacity-60"
+                      >
+                        <span>Table {t.label}</span>
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-100/90 px-1 py-0.2 rounded">
+                          Booked
+                        </span>
+                      </button>
+                    )
+                  }
+
+                  if (isCleaning) {
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        disabled
+                        className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed flex items-center gap-1 opacity-60"
+                      >
+                        <span>Table {t.label}</span>
+                        <span className="text-[10px] font-bold text-stone-500 bg-stone-200 px-1 py-0.2 rounded">
+                          Cleaning
+                        </span>
+                      </button>
+                    )
+                  }
+
                   return (
                     <button
                       key={t.id}
@@ -311,10 +405,15 @@ export default function CheckoutPage() {
                       className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 active:scale-95 ${
                         isSelected
                           ? 'bg-amber-600 text-white shadow-sm ring-2 ring-amber-400'
+                          : isOwnActive
+                          ? 'bg-emerald-50 text-emerald-900 border border-emerald-300'
                           : 'bg-stone-50 text-stone-800 border border-stone-200 hover:border-amber-400 hover:bg-amber-50/50'
                       }`}
                     >
                       <span>Table {t.label}</span>
+                      {isOwnActive && !isSelected && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      )}
                       {isSelected && <CheckCircle2 className="w-3 h-3 text-white" />}
                     </button>
                   )

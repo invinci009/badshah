@@ -87,14 +87,31 @@ export default function OrderMenuPage() {
   const [addedKey, setAddedKey] = useState<string | null>(null)
 
   // Table Selection for Main QR
-  const [availableTables, setAvailableTables] = useState<Array<{ id: string; label: string }>>([])
+  const [availableTables, setAvailableTables] = useState<Array<{ id: string; label: string; state?: string }>>([])
   const [tableModalOpen, setTableModalOpen] = useState(false)
+  const [activeSession, setActiveSession] = useState<{
+    orderId: string
+    accessToken?: string
+    tableLabel: string
+  } | null>(null)
 
   // Service Request Modal
   const [serviceModalOpen, setServiceModalOpen] = useState(false)
   const [serviceType, setServiceType] = useState<string>('water')
   const [serviceNote, setServiceNote] = useState<string>('')
   const [serviceSending, setServiceSending] = useState(false)
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(`rp_active_order_${slug}`)
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (parsed?.tableLabel) setActiveSession(parsed)
+        }
+      } catch {}
+    }
+  }, [slug])
 
   useEffect(() => {
     const q = new URLSearchParams()
@@ -108,7 +125,12 @@ export default function OrderMenuPage() {
         setItems(data.items || [])
         setCategories(data.categories || [])
         setAvailableTables(data.tables || [])
-        const resolvedTable = data.table?.label || tableParam || null
+        let resolvedTable = data.table?.label || tableParam || null
+        if (!resolvedTable && typeof window !== 'undefined') {
+          try {
+            resolvedTable = sessionStorage.getItem(`rp_table_${slug}`) || null
+          } catch {}
+        }
         setTableLabel(resolvedTable)
         if (resolvedTable) {
           const tableSpecificCart = loadCart(slug, resolvedTable)
@@ -120,6 +142,22 @@ export default function OrderMenuPage() {
       .catch((e) => setError(e instanceof Error ? e.message : 'Menu unavailable'))
       .finally(() => setLoading(false))
   }, [slug, token, tableParam])
+
+  const switchTable = (label: string, state?: string) => {
+    const isOwnActive = activeSession?.tableLabel === label
+    if (state === 'occupied' && !isOwnActive) return
+    if (state === 'cleaning') return
+
+    setTableLabel(label)
+    setTableModalOpen(false)
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.setItem(`rp_table_${slug}`, label)
+      } catch {}
+    }
+    const tableCart = loadCart(slug, label)
+    setCart(tableCart)
+  }
 
   const updateCart = (next: CartLine[]) => {
     setCart(next)
@@ -855,6 +893,124 @@ export default function OrderMenuPage() {
                 Send Staff Request
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Table Switcher Modal */}
+      {tableModalOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-stone-900/60 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4 animate-in fade-in duration-200"
+          onClick={() => setTableModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-white rounded-t-3xl sm:rounded-3xl p-5 space-y-4 animate-in slide-in-from-bottom-4 duration-300 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-stone-100 pb-3">
+              <div>
+                <h2 className="font-black text-base text-stone-900 flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-amber-600" />
+                  Select Your Table
+                </h2>
+                <p className="text-[11px] text-stone-500">
+                  {tableLabel ? `Currently: Table ${tableLabel}` : 'Choose your seated table'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTableModalOpen(false)}
+                className="p-1.5 rounded-lg text-stone-400 hover:text-stone-700 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-stone-600">
+              Select where you are seated. Booked tables are unavailable for other guests:
+            </p>
+
+            <div className="flex flex-wrap gap-2 max-h-60 overflow-y-auto py-1">
+              {availableTables.map((t) => {
+                const isSelected = tableLabel === t.label
+                const isOwnActive = activeSession?.tableLabel === t.label
+                const isOccupied = t.state === 'occupied' && !isOwnActive
+                const isCleaning = t.state === 'cleaning'
+
+                if (isOccupied) {
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      disabled
+                      title={`Table ${t.label} is currently booked by another guest.`}
+                      className="px-3 py-2 rounded-xl text-xs font-semibold bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed opacity-60 flex items-center gap-1.5"
+                    >
+                      <span>Table {t.label}</span>
+                      <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.2 rounded">
+                        Booked
+                      </span>
+                    </button>
+                  )
+                }
+
+                if (isCleaning) {
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      disabled
+                      className="px-3 py-2 rounded-xl text-xs font-semibold bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed opacity-60 flex items-center gap-1.5"
+                    >
+                      <span>Table {t.label}</span>
+                      <span className="text-[10px] font-bold text-stone-500 bg-stone-200 px-1.5 py-0.2 rounded">
+                        Cleaning
+                      </span>
+                    </button>
+                  )
+                }
+
+                return (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => switchTable(t.label, t.state)}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+                      isSelected
+                        ? 'bg-amber-600 text-white shadow-md ring-2 ring-amber-400'
+                        : isOwnActive
+                        ? 'bg-emerald-50 text-emerald-900 border border-emerald-300'
+                        : 'bg-stone-50 text-stone-800 border border-stone-200 hover:border-amber-400 hover:bg-amber-50/60'
+                    }`}
+                  >
+                    <span>Table {t.label}</span>
+                    {isOwnActive && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />}
+                    {isSelected && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                  </button>
+                )
+              })}
+
+              <button
+                type="button"
+                onClick={() => switchTable('Counter')}
+                className={`px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
+                  tableLabel === 'Counter'
+                    ? 'bg-amber-600 text-white shadow-md ring-2 ring-amber-400'
+                    : 'bg-stone-50 text-stone-800 border border-stone-200 hover:border-amber-400 hover:bg-amber-50/60'
+                }`}
+              >
+                <span>Counter / Takeaway</span>
+                {tableLabel === 'Counter' && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setTableModalOpen(false)}
+              className="w-full h-10 rounded-xl bg-stone-900 text-white font-bold text-xs cursor-pointer hover:bg-stone-800 transition-colors"
+            >
+              Close
+            </button>
           </div>
         </div>
       )}

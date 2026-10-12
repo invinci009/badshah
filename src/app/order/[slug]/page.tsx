@@ -113,7 +113,7 @@ export default async function OrderPortalPage({ params, searchParams }: PortalPa
   const allTables = await getTables(true).catch(() => [])
   const activeTables = allTables
     .filter((t) => t.active)
-    .map((t) => ({ id: t.id, label: t.label }))
+    .map((t) => ({ id: t.id, label: t.label, state: t.state || 'available' }))
 
   return (
     <div className="min-h-screen min-h-[100dvh] bg-[#faf8f5] bg-gradient-to-b from-[#fdfbf7] via-[#fbf7ee] to-[#f6efe0] text-stone-900 flex flex-col px-3 sm:px-6 py-4 sm:py-8 relative overflow-x-hidden selection:bg-amber-600 selection:text-white">

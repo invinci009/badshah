@@ -16,7 +16,7 @@ interface MainPortalSelectorProps {
   slug: string
   initialTable: string | null
   token?: string | null
-  tables: Array<{ id: string; label: string }>
+  tables: Array<{ id: string; label: string; state?: string }>
   restaurantName: string
   reviewSlug: string
 }
@@ -29,6 +29,13 @@ export default function MainPortalSelector({
   restaurantName,
   reviewSlug,
 }: MainPortalSelectorProps) {
+  const [activeSession, setActiveSession] = useState<{
+    orderId: string
+    accessToken?: string
+    tableLabel: string
+    orderNumber?: string
+  } | null>(null)
+
   const [selectedTable, setSelectedTable] = useState<string | null>(() => {
     if (initialTable) return initialTable
     if (typeof window !== 'undefined') {
@@ -41,11 +48,36 @@ export default function MainPortalSelector({
     return null
   })
 
-  const [pickerOpen, setPickerOpen] = useState(false)
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      const raw = localStorage.getItem(`rp_active_order_${slug}`)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed?.tableLabel) {
+          setActiveSession(parsed)
+          // If no table was explicitly picked, align with active table
+          if (!selectedTable && !initialTable) {
+            setSelectedTable(parsed.tableLabel)
+          }
+        }
+      }
+    } catch {
+      // storage unavailable
+    }
+  }, [slug, initialTable, selectedTable])
 
-  const handleSelectTable = (label: string) => {
+  const handleSelectTable = (label: string, state?: string) => {
+    // Cannot select an occupied or cleaning table unless it's the customer's own active table
+    const isOwnActive = activeSession?.tableLabel === label
+    if (state === 'occupied' && !isOwnActive) {
+      return
+    }
+    if (state === 'cleaning') {
+      return
+    }
+
     setSelectedTable(label)
-    setPickerOpen(false)
     if (typeof window !== 'undefined') {
       try {
         sessionStorage.setItem(`rp_table_${slug}`, label)
@@ -56,6 +88,9 @@ export default function MainPortalSelector({
   }
 
   const effectiveTable = selectedTable || initialTable
+  const currentTableObj = tables.find((t) => t.label === effectiveTable)
+  const isCurrentTableOccupiedByOther =
+    currentTableObj?.state === 'occupied' && activeSession?.tableLabel !== effectiveTable
 
   const menuParams = new URLSearchParams()
   if (effectiveTable) menuParams.set('table', effectiveTable)
@@ -69,6 +104,44 @@ export default function MainPortalSelector({
 
   return (
     <div className="space-y-4">
+      {/* Active Dining Session Banner if customer already ordered */}
+      {activeSession && (
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-50 via-teal-50/60 to-emerald-50 border border-emerald-300 text-left space-y-2 animate-in fade-in slide-in-from-top-2 duration-300 shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-black text-emerald-950 flex items-center gap-1.5">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              </span>
+              <span>Table {activeSession.tableLabel} • Active Dine-in</span>
+            </span>
+            <span className="text-[10px] font-extrabold uppercase tracking-wide bg-emerald-200/70 text-emerald-900 px-2 py-0.5 rounded-full">
+              Booked for you
+            </span>
+          </div>
+          <p className="text-[11px] text-emerald-900/80 leading-relaxed">
+            Your table is booked and order is active. You can track your kitchen status or easily add more dishes.
+          </p>
+          <div className="flex items-center gap-2 pt-0.5">
+            <Link
+              href={`/order/${slug}/confirmation/${activeSession.orderId}?accessToken=${encodeURIComponent(
+                activeSession.accessToken || ''
+              )}`}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Track Order</span>
+            </Link>
+            <Link
+              href={`/order/${slug}/menu?table=${encodeURIComponent(activeSession.tableLabel)}`}
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-white border border-emerald-300 hover:bg-emerald-50 text-emerald-900 text-xs font-bold transition-colors"
+            >
+              <span>+ Add More Dishes</span>
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* Seated Table Status & Main QR Table Picker */}
       {token ? (
         // Specific physical Table QR with cryptographic token
@@ -85,45 +158,96 @@ export default function MainPortalSelector({
           </div>
         </div>
       ) : (
-        // MAIN QR: User can choose or change their table number!
+        // MAIN QR: User can choose their table number with real-time occupancy locking
         <div className="pt-1 space-y-2.5">
           <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-300/80 text-left space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
                 <MapPin className="w-4 h-4 text-amber-600" />
-                <span>Select Your Table Number</span>
+                <span>Select Your Table</span>
               </span>
-              {effectiveTable && (
+              {effectiveTable && !isCurrentTableOccupiedByOther && (
                 <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded-full flex items-center gap-1">
                   <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                   Table {effectiveTable} Selected
                 </span>
               )}
             </div>
-            <p className="text-[11px] text-amber-900/80">
-              Please tap your table number below so food is served directly to you:
-            </p>
+
+            {isCurrentTableOccupiedByOther ? (
+              <div className="p-2 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-center gap-1.5">
+                <span>Table {effectiveTable} is currently booked by another guest. Please tap an open table below:</span>
+              </div>
+            ) : (
+              <p className="text-[11px] text-amber-900/80">
+                Tap your seated table below to book it for your party. Booked tables are locked for others:
+              </p>
+            )}
 
             {/* Table Selection Chips */}
             <div className="flex flex-wrap gap-2 pt-1">
               {tables.map((t) => {
                 const isSelected = effectiveTable === t.label
+                const isOwnActive = activeSession?.tableLabel === t.label
+                const isOccupied = t.state === 'occupied' && !isOwnActive
+                const isCleaning = t.state === 'cleaning'
+
+                if (isOccupied) {
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      disabled
+                      title={`Table ${t.label} is currently occupied/booked by another guest.`}
+                      className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed flex items-center gap-1.5 opacity-60"
+                    >
+                      <span>Table {t.label}</span>
+                      <span className="text-[10px] font-bold text-amber-700 bg-amber-100/90 px-1.5 py-0.2 rounded">
+                        Booked
+                      </span>
+                    </button>
+                  )
+                }
+
+                if (isCleaning) {
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      disabled
+                      title={`Table ${t.label} is being cleaned.`}
+                      className="px-2.5 py-1.5 rounded-xl text-xs font-semibold bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed flex items-center gap-1.5 opacity-60"
+                    >
+                      <span>Table {t.label}</span>
+                      <span className="text-[10px] font-bold text-stone-600 bg-stone-200 px-1.5 py-0.2 rounded">
+                        Cleaning
+                      </span>
+                    </button>
+                  )
+                }
+
                 return (
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => handleSelectTable(t.label)}
+                    onClick={() => handleSelectTable(t.label, t.state)}
                     className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
                       isSelected
                         ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30 ring-2 ring-amber-400'
+                        : isOwnActive
+                        ? 'bg-emerald-50 text-emerald-900 border border-emerald-300 hover:bg-emerald-100'
                         : 'bg-white text-stone-800 border border-amber-200 hover:border-amber-400 hover:bg-amber-50/60'
                     }`}
                   >
                     <span>Table {t.label}</span>
+                    {isOwnActive && !isSelected && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    )}
                     {isSelected && <CheckCircle2 className="w-3 h-3 text-white" />}
                   </button>
                 )
               })}
+
               <button
                 type="button"
                 onClick={() => handleSelectTable('Counter')}

@@ -5,11 +5,14 @@ import {
   getOrderingConfig,
   resolveTableToken,
   getTables,
+  getTable,
+  getOrdersByTable,
   normalizeTableLabel,
   getOrderByIdempotencyKey,
   allocateOrderNumber,
   createOrder,
   type OrderItemSnapshot,
+  type DiningTable,
 } from '@/lib/firebase/ordering'
 import { hashToken, generateOrderAccessToken } from '@/lib/ordering/tokens'
 import { orderCreateSchema, normalizePhoneServerSide } from '@/lib/ordering/validation'
@@ -61,11 +64,13 @@ export async function POST(request: NextRequest) {
     // 3. Table resolution (token or table label)
     let tableId: string | null = null
     let tableLabel: string | null = null
+    let canonicalTable: DiningTable | null = null
     if (input.tableToken) {
       const resolved = await resolveTableToken(hashToken(input.tableToken))
       if (!resolved) return NextResponse.json({ error: 'Table code expired or revoked' }, { status: 410 })
       tableId = resolved.table.id
       tableLabel = resolved.table.label
+      canonicalTable = resolved.table
     } else {
       const orderingCfg = await getOrderingConfig().catch(() => null)
       if (orderingCfg && !orderingCfg.generalOrderingEnabled && !input.tableLabel) {
@@ -85,11 +90,60 @@ export async function POST(request: NextRequest) {
       if (matched) {
         tableId = matched.id
         tableLabel = matched.label // Canonical label (e.g. "1" instead of "table 01")
+        canonicalTable = matched
         if (!matched.active) {
           return NextResponse.json(
             { error: `Table "${matched.label}" is currently inactive. Please contact staff.` },
             { status: 403 }
           )
+        }
+      }
+    }
+
+    // Table booking & occupancy protection:
+    // If table is booked or occupied, it is unavailable for other customers.
+    // Diners belonging to the SAME active session (matching phone or matching active order token) can order add-ons.
+    if (tableId) {
+      const currentTable = canonicalTable || (await getTable(tableId).catch(() => null))
+      if (currentTable) {
+        if (currentTable.state === 'cleaning') {
+          return NextResponse.json(
+            {
+              error: `Table "${currentTable.label}" is currently being prepared and sanitized. Please choose another table or speak to staff.`,
+              code: 'TABLE_CLEANING',
+              tableLabel: currentTable.label,
+            },
+            { status: 409 }
+          )
+        }
+
+        const tableOrders = await getOrdersByTable(tableId, 20).catch(() => [])
+        const activeOrders = tableOrders.filter(
+          (o) => !['SERVED', 'CANCELLED'].includes(o.fulfilment)
+        )
+
+        const isOccupiedOrActive = currentTable.state === 'occupied' || activeOrders.length > 0
+
+        if (isOccupiedOrActive) {
+          const isSamePartyPhone = activeOrders.some((o) => o.customerPhone === phone)
+          let isSamePartyToken = false
+          if (input.existingOrderId && input.activeOrderAccessToken) {
+            const matchedOrder = activeOrders.find((o) => o.id === input.existingOrderId)
+            if (matchedOrder && matchedOrder.accessTokenHash === hashToken(input.activeOrderAccessToken)) {
+              isSamePartyToken = true
+            }
+          }
+
+          if (!isSamePartyPhone && !isSamePartyToken) {
+            return NextResponse.json(
+              {
+                error: `Table "${currentTable.label}" is currently booked by another guest. Please select an available table or ask staff for assistance.`,
+                code: 'TABLE_OCCUPIED',
+                tableLabel: currentTable.label,
+              },
+              { status: 409 }
+            )
+          }
         }
       }
     }
