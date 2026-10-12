@@ -57,7 +57,7 @@ export interface TableQrToken {
 }
 
 export async function getTables(includeInactive = true): Promise<DiningTable[]> {
-  const tables = await getCached('tables:all', 15 * 1000, async () => {
+  const tables = await getCached('tables:all', 10 * 60 * 1000, async () => {
     const q = getDb().collection('diningTables').orderBy('label', 'asc')
     const snapshot = await q.get()
     return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as DiningTable)
@@ -249,7 +249,7 @@ export interface OrderingConfig {
 }
 
 export async function getOrderingConfig(): Promise<OrderingConfig> {
-  return getCached('order:config', 5 * 60 * 1000, async () => {
+  return getCached('order:config', 30 * 60 * 1000, async () => {
     const snap = await getDb().doc('restaurant/ordering').get()
     if (!snap.exists) {
       return {
@@ -332,7 +332,7 @@ export interface OrderMenuItem {
 }
 
 export async function getOrderMenuCategories(): Promise<OrderMenuCategory[]> {
-  return getCached('order:categories', 5 * 60 * 1000, async () => {
+  return getCached('order:categories', 30 * 60 * 1000, async () => {
     const snap = await getDb().collection('orderMenuCategories').orderBy('position', 'asc').get()
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderMenuCategory)
   })
@@ -370,7 +370,7 @@ export async function upsertOrderMenuCategory(data: {
 }
 
 export async function getOrderMenuItems(): Promise<OrderMenuItem[]> {
-  return getCached('order:menu_items', 5 * 60 * 1000, async () => {
+  return getCached('order:menu_items', 30 * 60 * 1000, async () => {
     const snap = await getDb().collection('orderMenuItems').orderBy('position', 'asc').get()
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderMenuItem)
   })

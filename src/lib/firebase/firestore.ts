@@ -72,7 +72,7 @@ export interface RestaurantSettings {
 import { getCached, invalidateCache } from '../cache'
 
 export async function getRestaurantSettings(): Promise<RestaurantSettings | null> {
-  return getCached('settings:restaurant', 5 * 60 * 1000, async () => {
+  return getCached('settings:restaurant', 30 * 60 * 1000, async () => {
     const docRef = getDb().doc('restaurant/settings')
     const snapshot = await docRef.get()
     if (!snapshot.exists) return null
@@ -106,14 +106,14 @@ export interface Campaign {
 }
 
 export async function getCampaigns(): Promise<Campaign[]> {
-  return getCached('campaigns:all', 5 * 60 * 1000, async () => {
+  return getCached('campaigns:all', 30 * 60 * 1000, async () => {
     const snapshot = await getDb().collection('campaigns').orderBy('createdAt', 'desc').get()
     return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as Campaign)
   })
 }
 
 export async function getCampaignBySlug(slug: string): Promise<Campaign | null> {
-  return getCached(`campaign:${slug}`, 5 * 60 * 1000, async () => {
+  return getCached(`campaign:${slug}`, 30 * 60 * 1000, async () => {
     const snapshot = await getDb().collection('campaigns').where('slug', '==', slug).limit(1).get()
     if (snapshot.empty) return null
     const d = snapshot.docs[0]
@@ -164,7 +164,7 @@ export interface MenuItem {
 }
 
 export async function getMenuItems(): Promise<MenuItem[]> {
-  return getCached('menu_items:all', 5 * 60 * 1000, async () => {
+  return getCached('menu_items:all', 30 * 60 * 1000, async () => {
     const snapshot = await getDb().collection('menuItems').orderBy('position', 'asc').get()
     return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as MenuItem)
   })

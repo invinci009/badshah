@@ -142,9 +142,6 @@ export default async function OrderPortalPage({ params, searchParams }: PortalPa
                 src={logoUrl || '/logo.png'}
                 alt={restaurantName}
                 className="w-full h-full object-cover"
-                onError={(e) => {
-                  e.currentTarget.src = '/logo.png'
-                }}
               />
             </div>
             <div className="absolute -bottom-1 -right-1 p-1 rounded-full bg-white shadow-md border border-stone-200 text-amber-600">
