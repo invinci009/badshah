@@ -8,7 +8,7 @@ import {
   deleteOrderMenuItem,
 } from '@/lib/firebase/ordering'
 import { getSessionFromRequest } from '@/lib/firebase/auth'
-import { orderMenuItemUpsertSchema } from '@/lib/ordering/validation'
+import { orderMenuItemUpsertSchema, normalizeImageUrl } from '@/lib/ordering/validation'
 import { z } from 'zod'
 
 const toggleSchema = z.object({ id: z.string().min(1), available: z.boolean().optional(), visible: z.boolean().optional() })
@@ -17,7 +17,11 @@ export async function GET(request: NextRequest) {
   const user = await getSessionFromRequest(request)
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
-    return NextResponse.json(await getOrderMenuItems(), { status: 200 })
+    const items = await getOrderMenuItems()
+    return NextResponse.json(
+      items.map((i) => ({ ...i, imageUrl: normalizeImageUrl(i.imageUrl) })),
+      { status: 200 }
+    )
   } catch (error) {
     console.error('Order-menu items GET error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

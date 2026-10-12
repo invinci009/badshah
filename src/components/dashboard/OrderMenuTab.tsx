@@ -471,6 +471,7 @@ export default function OrderMenuTab({ onRefresh }: { onRefresh: () => void }) {
                     <img
                       src={fImageUrl}
                       alt="Preview"
+                      referrerPolicy="no-referrer"
                       className="w-16 h-16 rounded-lg object-cover border border-slate-700 bg-slate-950 shrink-0"
                     />
                     <div className="flex-1 min-w-0 space-y-1">
@@ -641,6 +642,7 @@ export default function OrderMenuTab({ onRefresh }: { onRefresh: () => void }) {
                       <img
                         src={item.imageUrl}
                         alt={item.name}
+                        referrerPolicy="no-referrer"
                         className="w-full h-full object-cover"
                         loading="lazy"
                       />

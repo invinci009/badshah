@@ -10,6 +10,7 @@ import {
 } from '@/lib/firebase/ordering'
 import { hashToken } from '@/lib/ordering/tokens'
 import { getRestaurantConfig } from '@/config/loader'
+import { normalizeImageUrl } from '@/lib/ordering/validation'
 
 // GET /api/public/order-menu?slug=...&token=...
 // Public menu: only visible items (availability flagged for sold-out labels).
@@ -84,7 +85,7 @@ export async function GET(request: NextRequest) {
             categoryId: i.categoryId,
             name: i.name,
             description: i.description || null,
-            imageUrl: i.imageUrl || null,
+            imageUrl: normalizeImageUrl(i.imageUrl),
             pricePaise: i.pricePaise,
             available: i.available,
             veg: i.veg,

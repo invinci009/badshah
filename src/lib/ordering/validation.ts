@@ -71,12 +71,18 @@ export function normalizeImageUrl(url: string | null | undefined): string | null
   // Google Drive file link: /file/d/{id}/... or ?id={id}
   const driveFileMatch = trimmed.match(/drive\.google\.com\/file\/d\/([a-zA-Z0-9_-]+)/)
   if (driveFileMatch && driveFileMatch[1]) {
-    return `https://lh3.googleusercontent.com/d/${driveFileMatch[1]}`
+    return `/api/public/image-proxy?id=${driveFileMatch[1]}`
   }
 
   const driveIdMatch = trimmed.match(/drive\.google\.com\/.*[?&]id=([a-zA-Z0-9_-]+)/)
   if (driveIdMatch && driveIdMatch[1]) {
-    return `https://lh3.googleusercontent.com/d/${driveIdMatch[1]}`
+    return `/api/public/image-proxy?id=${driveIdMatch[1]}`
+  }
+
+  // Existing lh3.googleusercontent.com links
+  const lh3Match = trimmed.match(/lh3\.googleusercontent\.com\/d\/([a-zA-Z0-9_-]+)/)
+  if (lh3Match && lh3Match[1]) {
+    return `/api/public/image-proxy?id=${lh3Match[1]}`
   }
 
   // Dropbox share links: replace dl=0 with raw=1 for direct image delivery
