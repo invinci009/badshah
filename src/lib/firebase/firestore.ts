@@ -357,7 +357,13 @@ export interface PrivateFeedback {
   contactName?: string
   contactValue?: string
   contactConsent: boolean
+  isComplaint?: boolean
+  status?: 'pending' | 'resolved' | 'contacted'
+  tableNumber?: string
+  source?: string
+  adminNote?: string
   createdAt: string
+  updatedAt?: string
 }
 
 export async function submitPrivateFeedback(data: {
@@ -377,13 +383,62 @@ export async function submitPrivateFeedback(data: {
     contactName: data.contactName || undefined,
     contactValue: data.contactValue || undefined,
     contactConsent: data.contactConsent,
+    status: 'pending',
     createdAt: now,
   }
   // Ensure contactName and contactValue are string | undefined, not null
   if (feedback.contactName === null) feedback.contactName = undefined
   if (feedback.contactValue === null) feedback.contactValue = undefined
   await docRef.set(stripUndefined({ ...feedback }))
+  invalidateCache('feedback:private')
   return { id: docRef.id, ...feedback }
+}
+
+export async function submitDirectComplaint(data: {
+  name: string
+  phone: string
+  complaint: string
+  category?: string
+  tableNumber?: string
+  slug?: string
+  sessionId?: string
+}): Promise<PrivateFeedback> {
+  const docRef = getDb().collection('privateFeedback').doc()
+  const now = new Date().toISOString()
+  const feedback: Omit<PrivateFeedback, 'id'> = {
+    sessionId: data.sessionId || `complaint_${Date.now()}`,
+    category: data.category || 'complaint',
+    message: data.complaint,
+    contactName: data.name,
+    contactValue: data.phone,
+    contactConsent: true,
+    isComplaint: true,
+    status: 'pending',
+    tableNumber: data.tableNumber || undefined,
+    source: 'direct_complaint_modal',
+    createdAt: now,
+  }
+  if (feedback.contactName === null) feedback.contactName = undefined
+  if (feedback.contactValue === null) feedback.contactValue = undefined
+  await docRef.set(stripUndefined({ ...feedback }))
+  invalidateCache('feedback:private')
+  return { id: docRef.id, ...feedback }
+}
+
+export async function updateFeedbackStatus(
+  id: string,
+  status: 'pending' | 'resolved' | 'contacted',
+  adminNote?: string
+): Promise<void> {
+  const updateData: Record<string, unknown> = {
+    status,
+    updatedAt: new Date().toISOString(),
+  }
+  if (adminNote !== undefined) {
+    updateData.adminNote = adminNote
+  }
+  await getDb().collection('privateFeedback').doc(id).set(updateData, { merge: true })
+  invalidateCache('feedback:private')
 }
 
 export async function getPrivateFeedback(): Promise<PrivateFeedback[]> {

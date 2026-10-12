@@ -120,7 +120,7 @@ export default function DashboardWorkspace({
     { key: 'campaigns', label: 'QR Campaigns', icon: QrCode, badge: campaigns.length },
     {
       key: 'feedback',
-      label: 'Inbox',
+      label: 'Inbox & Complaints',
       icon: MessageSquareHeart,
       badge: feedbackList.length > 0 ? feedbackList.length : undefined,
     },

@@ -6,6 +6,7 @@ import QuizProgressHeader from './QuizProgressHeader'
 import QuizNavigationControls from './QuizNavigationControls'
 import ReviewDraftCard from './ReviewDraftCard'
 import PrivateFeedbackModal from './PrivateFeedbackModal'
+import ComplaintModal from './ComplaintModal'
 import ThankYouCard from './ThankYouCard'
 import OfflineBanner from './OfflineBanner'
 import StarRatingQuestion from './questions/StarRatingQuestion'
@@ -16,7 +17,7 @@ import OrderedItemsQuestion, { type MenuItemData } from './questions/OrderedItem
 import ContactInfoQuestion, { type ContactInfoValue } from './questions/ContactInfoQuestion'
 import { trackClientEvent } from '@/lib/client/telemetry'
 import { useClientConfig } from '@/config/client'
-import { Clock, ShieldCheck, ArrowRight, Utensils, Loader2, Star, MapPin, Sparkles, MessageCircle, Phone, Copy, Check } from 'lucide-react'
+import { Clock, ShieldCheck, ArrowRight, Utensils, Loader2, Star, MapPin, Sparkles, MessageCircle, Phone, Copy, Check, AlertTriangle } from 'lucide-react'
 
 interface QuizFlowProps {
   slug: string
@@ -57,6 +58,7 @@ export default function QuizFlow({
   )
 
   const [isPrivateFeedbackOpen, setIsPrivateFeedbackOpen] = useState(false)
+  const [isComplaintModalOpen, setIsComplaintModalOpen] = useState(false)
   const [hasSyncError, setHasSyncError] = useState(false)
   const [pendingSync, setPendingSync] = useState<{ key: string; value: QuizAnswerValue } | null>(null)
   const [phoneCopied, setPhoneCopied] = useState(false)
@@ -436,12 +438,45 @@ export default function QuizFlow({
                 <ArrowRight className="w-4 h-4 ml-auto text-amber-700/60" />
               </Link>
 
+              {/* Direct Complaint & Admin Escalation Option */}
+              <button
+                type="button"
+                onClick={() => setIsComplaintModalOpen(true)}
+                className="inline-flex items-center justify-between w-full p-3 rounded-xl bg-rose-50/70 hover:bg-rose-100/80 border border-rose-200/80 text-rose-950 transition-all duration-200 cursor-pointer text-left group active:scale-[0.98]"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-rose-500/15 border border-rose-300/40 flex items-center justify-center text-rose-600 group-hover:bg-rose-500/25 transition-colors shrink-0">
+                    <AlertTriangle className="w-4 h-4 text-rose-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-rose-950 flex items-center gap-1.5">
+                      <span>Have a Complaint or Issue?</span>
+                      <span className="text-[10px] font-bold uppercase px-1.5 py-0.2 rounded bg-rose-200/70 text-rose-800">
+                        Admin Direct
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-rose-700/90 font-medium truncate">
+                      Call / Text admin directly or register a complaint
+                    </p>
+                  </div>
+                </div>
+                <ArrowRight className="w-4 h-4 text-rose-500 group-hover:translate-x-1 transition-transform shrink-0" />
+              </button>
+
               <p className="text-[11px] text-stone-400">
                 Seated at a dining table? Tap above to browse menu or rate your meal.
               </p>
             </div>
           </div>
         </main>
+
+        <ComplaintModal
+          isOpen={isComplaintModalOpen}
+          onClose={() => setIsComplaintModalOpen(false)}
+          restaurantName={restaurantName}
+          helplinePhone={helplinePhone || '+91 74882 60572'}
+          slug={slug}
+        />
       </>
     )
   }

@@ -56,6 +56,8 @@ export {
   saveReviewDraft,
   updateReviewDraft,
   submitPrivateFeedback,
+  submitDirectComplaint,
+  updateFeedbackStatus,
   getPrivateFeedback,
   logEvent,
   getEvents,
