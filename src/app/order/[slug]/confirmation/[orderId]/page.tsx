@@ -88,12 +88,20 @@ export default function OrderConfirmationPage() {
   useEffect(() => {
     if (!accessToken) return
     const raf = requestAnimationFrame(() => fetchOrder())
-    const t = setInterval(() => fetchOrder(true), 10000)
+    // If order is served or cancelled, final status is reached — stop polling
+    if (order && (order.fulfilment === 'SERVED' || order.fulfilment === 'CANCELLED')) {
+      return () => cancelAnimationFrame(raf)
+    }
+    const t = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchOrder(true)
+      }
+    }, 20000)
     return () => {
       cancelAnimationFrame(raf)
       clearInterval(t)
     }
-  }, [accessToken, fetchOrder])
+  }, [accessToken, fetchOrder, order?.fulfilment])
 
   if (!accessToken) {
     return (

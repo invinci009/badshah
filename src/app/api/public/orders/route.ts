@@ -6,6 +6,7 @@ import {
   resolveTableToken,
   getTables,
   getTable,
+  getActiveOrdersByTable,
   getOrdersByTable,
   normalizeTableLabel,
   getOrderByIdempotencyKey,
@@ -117,11 +118,7 @@ export async function POST(request: NextRequest) {
           )
         }
 
-        const tableOrders = await getOrdersByTable(tableId, 20).catch(() => [])
-        const activeOrders = tableOrders.filter(
-          (o) => !['SERVED', 'CANCELLED'].includes(o.fulfilment)
-        )
-
+        const activeOrders = await getActiveOrdersByTable(tableId).catch(() => [])
         const isOccupiedOrActive = currentTable.state === 'occupied' || activeOrders.length > 0
 
         if (isOccupiedOrActive) {

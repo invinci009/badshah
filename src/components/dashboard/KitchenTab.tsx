@@ -10,7 +10,9 @@ interface KOrder {
   customerName: string
   itemCount: number
   fulfilment: string
+  notes?: string
   createdAt: string
+  items?: Array<{ quantity: number; itemName: string; options?: Array<{ optionName: string }> }>
 }
 
 interface KDetail {
@@ -72,7 +74,7 @@ export default function KitchenTab() {
   const load = useCallback(async () => {
     try {
       const [oRes, sRes] = await Promise.all([
-        fetch('/api/business/orders?status=all&limit=200'),
+        fetch('/api/business/orders?status=active&limit=30'),
         fetch('/api/business/service-requests?status=OPEN'),
       ])
       const oData = await oRes.json()
@@ -83,18 +85,24 @@ export default function KitchenTab() {
         prevCount.current = newOnes
         setOrders(active)
         setError(null)
-        // Lazy-load details for visible cards — use ref to avoid stale closure
-        for (const o of active.slice(0, 12)) {
-          if (!detailsRef.current.has(o.id)) {
-            fetch(`/api/business/orders/${o.id}`).then(async (r) => {
-              const d = await r.json()
-              if (r.ok) {
-                detailsRef.current.set(o.id, d)
-                setDetails(new Map(detailsRef.current))
-              }
-            }).catch(() => {})
+        // Order rows now include items directly — zero extra N+1 reads
+        for (const o of active) {
+          if (o.items) {
+            detailsRef.current.set(o.id, {
+              order: {
+                id: o.id,
+                orderNumber: o.orderNumber,
+                items: o.items,
+                notes: o.notes,
+                customerName: o.customerName,
+                tableLabel: o.tableLabel,
+                fulfilment: o.fulfilment,
+                createdAt: o.createdAt,
+              },
+            })
           }
         }
+        setDetails(new Map(detailsRef.current))
       }
       const sData = await sRes.json()
       if (sRes.ok && Array.isArray(sData)) setRequests(sData)
@@ -110,7 +118,7 @@ export default function KitchenTab() {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         load()
       }
-    }, 25000)
+    }, 35000)
     return () => {
       cancelAnimationFrame(raf)
       clearInterval(t)

@@ -165,7 +165,7 @@ export default function OrdersTab({
         const params = new URLSearchParams()
         if (tableFilter !== 'all') params.set('tableId', tableFilter)
         if (search.trim()) params.set('q', search.trim())
-        params.set('limit', '300')
+        params.set('limit', '60')
         const res = await fetch(`/api/business/orders?${params.toString()}`)
         const data = await res.json()
         if (res.ok && Array.isArray(data)) {
@@ -194,7 +194,7 @@ export default function OrdersTab({
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         fetchOrders(true)
       }
-    }, 30000)
+    }, 45000)
     return () => {
       cancelAnimationFrame(raf)
       clearInterval(t)

@@ -1,6 +1,7 @@
 import 'server-only'
 import type { Firestore } from 'firebase-admin/firestore'
 import { getAdminFirestore } from './admin'
+import { getCached, invalidateCache } from '../cache'
 
 // ==============================================================================
 // Ordering persistence (Firestore, Admin SDK, server-only).
@@ -56,9 +57,11 @@ export interface TableQrToken {
 }
 
 export async function getTables(includeInactive = true): Promise<DiningTable[]> {
-  const q = getDb().collection('diningTables').orderBy('label', 'asc')
-  const snapshot = await q.get()
-  const tables = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as DiningTable)
+  const tables = await getCached('tables:all', 15 * 1000, async () => {
+    const q = getDb().collection('diningTables').orderBy('label', 'asc')
+    const snapshot = await q.get()
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as DiningTable)
+  })
   return includeInactive ? tables : tables.filter((t) => t.active)
 }
 
@@ -103,6 +106,7 @@ export async function createTable(data: { label: string; description?: string })
     updatedAt: now,
   }
   await ref.set(stripUndefined({ ...table }))
+  invalidateCache('tables:all')
   return { id: ref.id, ...table } as DiningTable
 }
 
@@ -125,6 +129,7 @@ export async function updateTable(
   await getDb()
     .doc(`diningTables/${id}`)
     .update(stripUndefined({ ...data, updatedAt: serverNow() }))
+  invalidateCache('tables:all')
 }
 
 /** Delete a table, revoke its active/historical tokens, and ensure no active orders are left dangling. */
@@ -164,6 +169,7 @@ export async function deleteTable(id: string): Promise<void> {
   // Delete the dining table doc
   batch.delete(tableRef)
   await batch.commit()
+  invalidateCache('tables:all')
 }
 
 /** Issue (or rotate) a table QR token. Revokes the previous token, keeps history. */
@@ -243,24 +249,26 @@ export interface OrderingConfig {
 }
 
 export async function getOrderingConfig(): Promise<OrderingConfig> {
-  const snap = await getDb().doc('restaurant/ordering').get()
-  if (!snap.exists) {
-    return {
-      taxRateBps: 500,
-      serviceChargePaise: 0,
-      generalOrderingEnabled: true,
-      currency: 'INR',
-      updatedAt: serverNow(),
+  return getCached('order:config', 5 * 60 * 1000, async () => {
+    const snap = await getDb().doc('restaurant/ordering').get()
+    if (!snap.exists) {
+      return {
+        taxRateBps: 500,
+        serviceChargePaise: 0,
+        generalOrderingEnabled: true,
+        currency: 'INR',
+        updatedAt: serverNow(),
+      }
     }
-  }
-  const d = snap.data() as Partial<OrderingConfig>
-  return {
-    taxRateBps: d.taxRateBps ?? 500,
-    serviceChargePaise: d.serviceChargePaise ?? 0,
-    generalOrderingEnabled: d.generalOrderingEnabled ?? true,
-    currency: d.currency ?? 'INR',
-    updatedAt: d.updatedAt ?? serverNow(),
-  }
+    const d = snap.data() as Partial<OrderingConfig>
+    return {
+      taxRateBps: d.taxRateBps ?? 500,
+      serviceChargePaise: d.serviceChargePaise ?? 0,
+      generalOrderingEnabled: d.generalOrderingEnabled ?? true,
+      currency: d.currency ?? 'INR',
+      updatedAt: d.updatedAt ?? serverNow(),
+    }
+  })
 }
 
 export async function saveOrderingConfig(data: {
@@ -271,6 +279,7 @@ export async function saveOrderingConfig(data: {
   await getDb()
     .doc('restaurant/ordering')
     .set({ ...data, currency: 'INR', updatedAt: serverNow() }, { merge: true })
+  invalidateCache('order:config')
 }
 
 // ---------------------------------------------------------------------------
@@ -323,8 +332,10 @@ export interface OrderMenuItem {
 }
 
 export async function getOrderMenuCategories(): Promise<OrderMenuCategory[]> {
-  const snap = await getDb().collection('orderMenuCategories').orderBy('position', 'asc').get()
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderMenuCategory)
+  return getCached('order:categories', 5 * 60 * 1000, async () => {
+    const snap = await getDb().collection('orderMenuCategories').orderBy('position', 'asc').get()
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderMenuCategory)
+  })
 }
 
 export async function upsertOrderMenuCategory(data: {
@@ -338,6 +349,7 @@ export async function upsertOrderMenuCategory(data: {
     await db.doc(`orderMenuCategories/${data.id}`).update(
       stripUndefined({ name: data.name, position: data.position, active: data.active, updatedAt: serverNow() })
     )
+    invalidateCache('order:categories')
     const snap = await db.doc(`orderMenuCategories/${data.id}`).get()
     return { id: snap.id, ...snap.data() } as OrderMenuCategory
   }
@@ -353,12 +365,15 @@ export async function upsertOrderMenuCategory(data: {
     updatedAt: now,
   }
   await ref.set(cat)
+  invalidateCache('order:categories')
   return { id: ref.id, ...cat }
 }
 
 export async function getOrderMenuItems(): Promise<OrderMenuItem[]> {
-  const snap = await getDb().collection('orderMenuItems').orderBy('position', 'asc').get()
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderMenuItem)
+  return getCached('order:menu_items', 5 * 60 * 1000, async () => {
+    const snap = await getDb().collection('orderMenuItems').orderBy('position', 'asc').get()
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderMenuItem)
+  })
 }
 
 export async function getOrderMenuItem(id: string): Promise<OrderMenuItem | null> {
@@ -375,6 +390,7 @@ export async function isMenuItemReferenced(itemId: string): Promise<boolean> {
 
 export async function deleteOrderMenuItem(id: string): Promise<void> {
   await getDb().doc(`orderMenuItems/${id}`).delete()
+  invalidateCache('order:menu_items')
 }
 
 export async function upsertOrderMenuItem(data: {
@@ -411,6 +427,7 @@ export async function upsertOrderMenuItem(data: {
         updatedAt: serverNow(),
       })
     )
+    invalidateCache('order:menu_items')
     const snap = await db.doc(`orderMenuItems/${data.id}`).get()
     return { id: snap.id, ...snap.data() } as OrderMenuItem
   }
@@ -435,15 +452,18 @@ export async function upsertOrderMenuItem(data: {
     updatedAt: now,
   }
   await ref.set(stripUndefined({ ...item }))
+  invalidateCache('order:menu_items')
   return { id: ref.id, ...item } as OrderMenuItem
 }
 
 export async function setOrderMenuItemAvailability(id: string, available: boolean): Promise<void> {
   await getDb().doc(`orderMenuItems/${id}`).update({ available, updatedAt: serverNow() })
+  invalidateCache('order:menu_items')
 }
 
 export async function setOrderMenuItemVisibility(id: string, visible: boolean): Promise<void> {
   await getDb().doc(`orderMenuItems/${id}`).update({ visible, updatedAt: serverNow() })
+  invalidateCache('order:menu_items')
 }
 
 // ---------------------------------------------------------------------------
@@ -508,18 +528,41 @@ export async function getOrder(id: string): Promise<Order | null> {
   return { id: snap.id, ...snap.data() } as Order
 }
 
-export async function getOrders(limit = 500): Promise<Order[]> {
+export async function getOrders(limit = 100): Promise<Order[]> {
   const snap = await getDb().collection('orders').orderBy('createdAt', 'desc').limit(limit).get()
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
 }
 
-export async function getOrdersByTable(tableId: string, limit = 200): Promise<Order[]> {
+/** Query only currently active kitchen/service orders to avoid full collection scans. */
+export async function getActiveOrders(limit = 50): Promise<Order[]> {
+  const snap = await getDb()
+    .collection('orders')
+    .where('fulfilment', 'in', ['RECEIVED', 'ACCEPTED', 'PREPARING', 'READY'])
+    .limit(limit)
+    .get()
+  const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+  return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+}
+
+/** Efficient query for active orders at a specific table (reads max 5 docs instead of entire history). */
+export async function getActiveOrdersByTable(tableId: string): Promise<Order[]> {
   const snap = await getDb()
     .collection('orders')
     .where('tableId', '==', tableId)
+    .where('fulfilment', 'in', ['RECEIVED', 'ACCEPTED', 'PREPARING', 'READY'])
+    .limit(5)
+    .get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+}
+
+export async function getOrdersByTable(tableId: string, limit = 20): Promise<Order[]> {
+  const snap = await getDb()
+    .collection('orders')
+    .where('tableId', '==', tableId)
+    .limit(limit)
     .get()
   const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
-  return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, limit)
+  return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
 }
 
 /** Allocate the next human-readable order number atomically. */
@@ -542,6 +585,7 @@ export async function createOrder(data: Omit<Order, 'id'>): Promise<Order> {
       .doc(`diningTables/${data.tableId}`)
       .update({ state: 'occupied', updatedAt: serverNow() })
       .catch(() => {})
+    invalidateCache('tables:all')
   }
   return { id: ref.id, ...data } as Order
 }
@@ -590,17 +634,16 @@ export async function transitionOrderStatus(
       const remainingSnap = await db
         .collection('orders')
         .where('tableId', '==', updated.tableId)
+        .where('fulfilment', 'in', ['RECEIVED', 'ACCEPTED', 'PREPARING', 'READY'])
+        .limit(2)
         .get()
-      const hasActiveOrders = remainingSnap.docs.some((d) => {
-        if (d.id === orderId) return false
-        const f = d.data()?.fulfilment
-        return f && f !== 'SERVED' && f !== 'CANCELLED'
-      })
+      const hasActiveOrders = remainingSnap.docs.some((d) => d.id !== orderId)
       if (!hasActiveOrders) {
         await db
           .doc(`diningTables/${updated.tableId}`)
           .update({ state: to === 'SERVED' ? 'cleaning' : 'available', updatedAt: serverNow() })
           .catch(() => {})
+        invalidateCache('tables:all')
       }
     } catch {
       // Non-critical background state sync
@@ -818,11 +861,15 @@ export async function createServiceRequest(data: {
   return { id: ref.id, ...req } as ServiceRequest
 }
 
-export async function getServiceRequests(status?: string, limit = 200): Promise<ServiceRequest[]> {
+export async function getServiceRequests(status?: string, limit = 50): Promise<ServiceRequest[]> {
   if (status) {
-    const snap = await getDb().collection('serviceRequests').where('status', '==', status).get()
+    const snap = await getDb()
+      .collection('serviceRequests')
+      .where('status', '==', status)
+      .limit(limit)
+      .get()
     const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)
-    return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || '')).slice(0, limit)
+    return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
   }
   const snap = await getDb().collection('serviceRequests').orderBy('createdAt', 'desc').limit(limit).get()
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)

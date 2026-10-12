@@ -69,11 +69,15 @@ export interface RestaurantSettings {
   updatedAt: string
 }
 
+import { getCached, invalidateCache } from '../cache'
+
 export async function getRestaurantSettings(): Promise<RestaurantSettings | null> {
-  const docRef = getDb().doc('restaurant/settings')
-  const snapshot = await docRef.get()
-  if (!snapshot.exists) return null
-  return { id: snapshot.id, ...snapshot.data() } as RestaurantSettings
+  return getCached('settings:restaurant', 5 * 60 * 1000, async () => {
+    const docRef = getDb().doc('restaurant/settings')
+    const snapshot = await docRef.get()
+    if (!snapshot.exists) return null
+    return { id: snapshot.id, ...snapshot.data() } as RestaurantSettings
+  })
 }
 
 export async function saveRestaurantSettings(settings: Omit<RestaurantSettings, 'id' | 'createdAt' | 'updatedAt'>): Promise<void> {
@@ -84,6 +88,7 @@ export async function saveRestaurantSettings(settings: Omit<RestaurantSettings, 
     createdAt: now,
     updatedAt: now,
   }), { merge: true })
+  invalidateCache('settings:restaurant')
 }
 
 // ==============================================================================
@@ -106,10 +111,12 @@ export async function getCampaigns(): Promise<Campaign[]> {
 }
 
 export async function getCampaignBySlug(slug: string): Promise<Campaign | null> {
-  const snapshot = await getDb().collection('campaigns').where('slug', '==', slug).limit(1).get()
-  if (snapshot.empty) return null
-  const d = snapshot.docs[0]
-  return { id: d.id, ...d.data() } as Campaign
+  return getCached(`campaign:${slug}`, 5 * 60 * 1000, async () => {
+    const snapshot = await getDb().collection('campaigns').where('slug', '==', slug).limit(1).get()
+    if (snapshot.empty) return null
+    const d = snapshot.docs[0]
+    return { id: d.id, ...d.data() } as Campaign
+  })
 }
 
 export async function createCampaign(data: { name: string; slug: string; active?: boolean }): Promise<Campaign> {
@@ -123,6 +130,7 @@ export async function createCampaign(data: { name: string; slug: string; active?
     updatedAt: now,
   }
   await docRef.set(campaign)
+  invalidateCache(`campaign:${data.slug}`)
   return { id: docRef.id, ...campaign }
 }
 
@@ -132,11 +140,13 @@ export async function updateCampaign(id: string, data: Partial<Pick<Campaign, 'n
     ...data,
     updatedAt: new Date().toISOString(),
   })
+  invalidateCache('campaign')
 }
 
 export async function deleteCampaign(id: string): Promise<void> {
   const docRef = getDb().doc(`campaigns/${id}`)
   await docRef.delete()
+  invalidateCache('campaign')
 }
 
 // ==============================================================================
