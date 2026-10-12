@@ -31,7 +31,7 @@ import {
   CheckCircle2,
 } from 'lucide-react'
 import { formatPaise, formatTableDisplay } from '@/lib/ordering/rules.mjs'
-import { loadCart, saveCart, cartLineKey, type CartLine, type CartSelection } from '@/lib/ordering/cart'
+import { loadCart, saveCart, cartLineKey, getActiveOrderSession, type CartLine, type CartSelection, type ActiveSession } from '@/lib/ordering/cart'
 
 interface MenuOption {
   id: string
@@ -89,11 +89,7 @@ export default function OrderMenuPage() {
   // Table Selection for Main QR
   const [availableTables, setAvailableTables] = useState<Array<{ id: string; label: string; state?: string }>>([])
   const [tableModalOpen, setTableModalOpen] = useState(false)
-  const [activeSession, setActiveSession] = useState<{
-    orderId: string
-    accessToken?: string
-    tableLabel: string
-  } | null>(null)
+  const [activeSession, setActiveSession] = useState<ActiveSession | null>(null)
 
   // Service Request Modal
   const [serviceModalOpen, setServiceModalOpen] = useState(false)
@@ -102,15 +98,7 @@ export default function OrderMenuPage() {
   const [serviceSending, setServiceSending] = useState(false)
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem(`rp_active_order_${slug}`)
-        if (raw) {
-          const parsed = JSON.parse(raw)
-          if (parsed?.tableLabel) setActiveSession(parsed)
-        }
-      } catch {}
-    }
+    setActiveSession(getActiveOrderSession(slug))
   }, [slug])
 
   useEffect(() => {

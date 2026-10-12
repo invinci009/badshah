@@ -75,3 +75,68 @@ export function clearCart(slug: string, table?: string | null): void {
     // ignore
   }
 }
+
+export interface ActiveSession {
+  orderId: string
+  orderNumber?: string
+  accessToken?: string
+  tableLabel: string
+  customerPhone?: string
+  customerName?: string
+  fulfilment?: string
+  createdAt: string
+}
+
+/** Maximum age for an active table booking banner on the customer's device (2 hours). */
+export const ACTIVE_SESSION_TTL_MS = 2 * 60 * 60 * 1000
+
+export function getActiveOrderSession(slug: string): ActiveSession | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(`rp_active_order_${slug}`)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as ActiveSession
+    if (!parsed || !parsed.tableLabel || !parsed.createdAt) {
+      window.localStorage.removeItem(`rp_active_order_${slug}`)
+      return null
+    }
+
+    const age = Date.now() - new Date(parsed.createdAt).getTime()
+    // Auto-expire after 2 hours
+    if (isNaN(age) || age > ACTIVE_SESSION_TTL_MS || age < 0) {
+      window.localStorage.removeItem(`rp_active_order_${slug}`)
+      return null
+    }
+
+    // Auto-expire after 30 minutes if already served or cancelled
+    if (
+      (parsed.fulfilment === 'SERVED' || parsed.fulfilment === 'CANCELLED') &&
+      age > 30 * 60 * 1000
+    ) {
+      window.localStorage.removeItem(`rp_active_order_${slug}`)
+      return null
+    }
+
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+export function saveActiveOrderSession(slug: string, session: ActiveSession): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(`rp_active_order_${slug}`, JSON.stringify(session))
+  } catch {
+    // storage unavailable
+  }
+}
+
+export function clearActiveOrderSession(slug: string): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.removeItem(`rp_active_order_${slug}`)
+  } catch {
+    // ignore
+  }
+}

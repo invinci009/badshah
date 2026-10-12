@@ -85,6 +85,11 @@ export default function OrderConfirmationPage() {
       if (!res.ok) throw new Error(data.error || 'Could not load order')
       setOrder(data)
       setError(null)
+      if (data.fulfilment === 'SERVED' || data.fulfilment === 'CANCELLED') {
+        try {
+          localStorage.removeItem(`rp_active_order_${slug}`)
+        } catch {}
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not load order')
     } finally {

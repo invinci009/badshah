@@ -535,13 +535,15 @@ export async function getOrders(limit = 100): Promise<Order[]> {
 
 /** Query only currently active kitchen/service orders to avoid full collection scans. */
 export async function getActiveOrders(limit = 50): Promise<Order[]> {
-  const snap = await getDb()
-    .collection('orders')
-    .where('fulfilment', 'in', ['RECEIVED', 'ACCEPTED', 'PREPARING', 'READY'])
-    .limit(limit)
-    .get()
-  const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
-  return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+  return getCached(`orders:active:${limit}`, 3000, async () => {
+    const snap = await getDb()
+      .collection('orders')
+      .where('fulfilment', 'in', ['RECEIVED', 'ACCEPTED', 'PREPARING', 'READY'])
+      .limit(limit)
+      .get()
+    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+    return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+  })
 }
 
 /** Efficient query for active orders at a specific table (reads max 5 docs instead of entire history). */
@@ -587,6 +589,7 @@ export async function createOrder(data: Omit<Order, 'id'>): Promise<Order> {
       .catch(() => {})
     invalidateCache('tables:all')
   }
+  invalidateCache('orders:active')
   return { id: ref.id, ...data } as Order
 }
 
@@ -650,6 +653,7 @@ export async function transitionOrderStatus(
     }
   }
 
+  invalidateCache('orders:active')
   return updated
 }
 

@@ -106,8 +106,10 @@ export interface Campaign {
 }
 
 export async function getCampaigns(): Promise<Campaign[]> {
-  const snapshot = await getDb().collection('campaigns').orderBy('createdAt', 'desc').get()
-  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as Campaign)
+  return getCached('campaigns:all', 5 * 60 * 1000, async () => {
+    const snapshot = await getDb().collection('campaigns').orderBy('createdAt', 'desc').get()
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as Campaign)
+  })
 }
 
 export async function getCampaignBySlug(slug: string): Promise<Campaign | null> {
@@ -162,8 +164,10 @@ export interface MenuItem {
 }
 
 export async function getMenuItems(): Promise<MenuItem[]> {
-  const snapshot = await getDb().collection('menuItems').orderBy('position', 'asc').get()
-  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as MenuItem)
+  return getCached('menu_items:all', 5 * 60 * 1000, async () => {
+    const snapshot = await getDb().collection('menuItems').orderBy('position', 'asc').get()
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as MenuItem)
+  })
 }
 
 export async function createMenuItem(data: { name: Record<string, string>; position?: number }): Promise<MenuItem> {
@@ -176,17 +180,20 @@ export async function createMenuItem(data: { name: Record<string, string>; posit
     createdAt: now,
   }
   await docRef.set(item)
+  invalidateCache('menu_items:all')
   return { id: docRef.id, ...item }
 }
 
 export async function updateMenuItem(id: string, data: Partial<Pick<MenuItem, 'name' | 'active' | 'position'>>): Promise<void> {
   const docRef = getDb().doc(`menuItems/${id}`)
   await docRef.update(data)
+  invalidateCache('menu_items:all')
 }
 
 export async function deleteMenuItem(id: string): Promise<void> {
   const docRef = getDb().doc(`menuItems/${id}`)
   await docRef.delete()
+  invalidateCache('menu_items:all')
 }
 
 // ==============================================================================
@@ -380,8 +387,10 @@ export async function submitPrivateFeedback(data: {
 }
 
 export async function getPrivateFeedback(): Promise<PrivateFeedback[]> {
-  const snapshot = await getDb().collection('privateFeedback').orderBy('createdAt', 'desc').get()
-  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as PrivateFeedback)
+  return getCached('feedback:private', 2 * 60 * 1000, async () => {
+    const snapshot = await getDb().collection('privateFeedback').orderBy('createdAt', 'desc').get()
+    return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as PrivateFeedback)
+  })
 }
 
 // ==============================================================================

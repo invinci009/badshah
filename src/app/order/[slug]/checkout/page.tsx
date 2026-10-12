@@ -5,7 +5,7 @@ import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Loader2, AlertTriangle, ArrowLeft, CheckCircle2, ShieldCheck, Receipt, ShoppingBag, MapPin } from 'lucide-react'
 import { formatPaise, isValidIndianPhone, formatTableDisplay } from '@/lib/ordering/rules.mjs'
-import { loadCart, clearCart, type CartLine } from '@/lib/ordering/cart'
+import { loadCart, clearCart, getActiveOrderSession, saveActiveOrderSession, type CartLine, type ActiveSession } from '@/lib/ordering/cart'
 
 interface QuoteItem {
   id: string
@@ -28,11 +28,7 @@ export default function CheckoutPage() {
   const [chargePaise, setChargePaise] = useState(0)
   const [tableLabel, setTableLabel] = useState<string | null>(tableParam || null)
   const [availableTables, setAvailableTables] = useState<Array<{ id: string; label: string; state?: string }>>([])
-  const [activeSession, setActiveSession] = useState<{
-    orderId: string
-    accessToken?: string
-    tableLabel: string
-  } | null>(null)
+  const [activeSession, setActiveSession] = useState<ActiveSession | null>(null)
   const [contactPhone, setContactPhone] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -58,15 +54,7 @@ export default function CheckoutPage() {
   const [priceConflict, setPriceConflict] = useState<{ quote: { totalPaise: number } } | null>(null)
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem(`rp_active_order_${slug}`)
-        if (raw) {
-          const parsed = JSON.parse(raw)
-          if (parsed?.tableLabel) setActiveSession(parsed)
-        }
-      } catch {}
-    }
+    setActiveSession(getActiveOrderSession(slug))
   }, [slug])
 
   useEffect(() => {
@@ -180,21 +168,16 @@ export default function CheckoutPage() {
       sessionStorage.removeItem(`rp_idem_${slug}`)
       clearCart(slug, tableLabel)
 
-      // Store active table booking in localStorage so the diner is recognized across all pages
-      try {
-        localStorage.setItem(
-          `rp_active_order_${slug}`,
-          JSON.stringify({
-            orderId: data.orderId,
-            orderNumber: data.orderNumber,
-            accessToken: data.accessToken,
-            tableLabel: data.tableLabel || tableLabel,
-            customerPhone: phone.trim(),
-            customerName: name.trim(),
-            createdAt: new Date().toISOString(),
-          })
-        )
-      } catch {}
+      // Store active table booking in localStorage so this specific customer device is recognized
+      saveActiveOrderSession(slug, {
+        orderId: data.orderId,
+        orderNumber: data.orderNumber,
+        accessToken: data.accessToken,
+        tableLabel: data.tableLabel || tableLabel,
+        customerPhone: phone.trim(),
+        customerName: name.trim(),
+        createdAt: new Date().toISOString(),
+      })
 
       const confirmationParams = new URLSearchParams()
       confirmationParams.set('accessToken', data.accessToken)

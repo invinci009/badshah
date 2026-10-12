@@ -12,6 +12,7 @@ import {
   ChevronDown,
 } from 'lucide-react'
 import { formatTableDisplay } from '@/lib/ordering/rules.mjs'
+import { getActiveOrderSession, type ActiveSession } from '@/lib/ordering/cart'
 
 interface MainPortalSelectorProps {
   slug: string
@@ -30,12 +31,7 @@ export default function MainPortalSelector({
   restaurantName,
   reviewSlug,
 }: MainPortalSelectorProps) {
-  const [activeSession, setActiveSession] = useState<{
-    orderId: string
-    accessToken?: string
-    tableLabel: string
-    orderNumber?: string
-  } | null>(null)
+  const [activeSession, setActiveSession] = useState<ActiveSession | null>(null)
 
   const [selectedTable, setSelectedTable] = useState<string | null>(() => {
     if (initialTable) return initialTable
@@ -50,21 +46,15 @@ export default function MainPortalSelector({
   })
 
   useEffect(() => {
-    if (typeof window === 'undefined') return
-    try {
-      const raw = localStorage.getItem(`rp_active_order_${slug}`)
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (parsed?.tableLabel) {
-          setActiveSession(parsed)
-          // If no table was explicitly picked, align with active table
-          if (!selectedTable && !initialTable) {
-            setSelectedTable(parsed.tableLabel)
-          }
-        }
+    const session = getActiveOrderSession(slug)
+    if (session) {
+      setActiveSession(session)
+      // If no table was explicitly picked, align with active table
+      if (!selectedTable && !initialTable) {
+        setSelectedTable(session.tableLabel)
       }
-    } catch {
-      // storage unavailable
+    } else {
+      setActiveSession(null)
     }
   }, [slug, initialTable, selectedTable])
 

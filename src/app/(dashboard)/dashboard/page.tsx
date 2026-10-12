@@ -14,6 +14,7 @@ import {
 import { getTables } from '@/lib/firebase/ordering'
 import { getOrderMenuItems } from '@/lib/firebase/ordering'
 import { getRestaurantConfig } from '@/config/loader'
+import { getCached } from '@/lib/cache'
 import DashboardWorkspace from '@/components/dashboard/DashboardWorkspace'
 import type { AnalyticsData } from '@/components/dashboard/OverviewTab'
 import type { ResponseItem } from '@/components/dashboard/ResponsesTab'
@@ -55,7 +56,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       console.warn('Dashboard getCampaigns failed:', e.message)
       return []
     }),
-    getEvents({ limit: 200 }).catch((e) => {
+    getCached('dashboard:events', 3 * 60 * 1000, () => getEvents({ limit: 200 })).catch((e) => {
       console.warn('Dashboard getEvents failed:', e.message)
       return []
     }),
@@ -97,50 +98,61 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     }
   }
 
-  // 5. Fetch sessions for all event sessionIds — safely with catch
-  const sessionIds = [...new Set(events.map((e) => e.sessionId).filter(Boolean))].slice(0, 100) as string[]
-  const sessionDocs = await Promise.all(
-    sessionIds.map((sessionId) => getSession(sessionId).catch(() => null))
-  )
-  const sessions: Array<{ id: string; campaignId: string; status: string; createdAt: string; completedAt: string | null }> = []
+  // 5-7. Fetch & cache session analytics — 3-minute TTL eliminates 300+ reads per dashboard navigation
+  const sessionAnalytics = await getCached('dashboard:session_analytics', 3 * 60 * 1000, async () => {
+    const sessionIds = [...new Set(events.map((e) => e.sessionId).filter(Boolean))].slice(0, 100) as string[]
+    const sessionDocs = await Promise.all(
+      sessionIds.map((sessionId) => getSession(sessionId).catch(() => null))
+    )
+    const sessionsList: Array<{ id: string; campaignId: string; status: string; createdAt: string; completedAt: string | null }> = []
 
-  for (const session of sessionDocs) {
-    if (session) {
-      sessions.push({
-        id: session.id,
-        campaignId: session.campaignId,
-        status: session.status,
-        createdAt: session.createdAt,
-        completedAt: session.completedAt,
+    for (const session of sessionDocs) {
+      if (session) {
+        sessionsList.push({
+          id: session.id,
+          campaignId: session.campaignId,
+          status: session.status,
+          createdAt: session.createdAt,
+          completedAt: session.completedAt,
+        })
+      }
+    }
+
+    const [answersList, draftsList] = await Promise.all([
+      Promise.all(sessionsList.map((session) => getSessionAnswers(session.id).catch(() => []))),
+      Promise.all(sessionsList.map((session) => getReviewDraft(session.id).catch(() => null))),
+    ])
+
+    const answersArray: Array<{ sessionId: string; entries: [string, unknown][] }> = []
+    for (let i = 0; i < sessionsList.length; i++) {
+      answersArray.push({
+        sessionId: sessionsList[i].id,
+        entries: answersList[i].map((a) => [a.questionKey, a.value] as [string, unknown]),
       })
     }
-  }
 
-  // 6-7. Fetch answers + drafts for all sessions safely
-  const [answersList, draftsList] = await Promise.all([
-    Promise.all(sessions.map((session) => getSessionAnswers(session.id).catch(() => []))),
-    Promise.all(sessions.map((session) => getReviewDraft(session.id).catch(() => null))),
-  ])
+    const draftsArray: Array<{ sessionId: string; draft: { originalText: string; finalText: string } | null }> = []
+    for (let i = 0; i < sessionsList.length; i++) {
+      const draft = draftsList[i]
+      draftsArray.push({
+        sessionId: sessionsList[i].id,
+        draft: draft ? { originalText: draft.originalText, finalText: draft.finalText } : null,
+      })
+    }
 
-  // 6. Index answers by session
+    return { sessions: sessionsList, answersArray, draftsArray }
+  })
+
+  const sessions = sessionAnalytics.sessions
   const answersBySession = new Map<string, Map<string, unknown>>()
-  for (let i = 0; i < sessions.length; i++) {
-    const answerMap = new Map<string, unknown>()
-    for (const a of answersList[i]) {
-      answerMap.set(a.questionKey, a.value)
-    }
-    answersBySession.set(sessions[i].id, answerMap)
+  for (const item of sessionAnalytics.answersArray) {
+    answersBySession.set(item.sessionId, new Map(item.entries))
   }
 
-  // 7. Index review drafts by session
   const draftsBySession = new Map<string, { originalText: string; finalText: string }>()
-  for (let i = 0; i < sessions.length; i++) {
-    const draft = draftsList[i]
-    if (draft) {
-      draftsBySession.set(sessions[i].id, {
-        originalText: draft.originalText,
-        finalText: draft.finalText,
-      })
+  for (const item of sessionAnalytics.draftsArray) {
+    if (item.draft) {
+      draftsBySession.set(item.sessionId, item.draft)
     }
   }
 
