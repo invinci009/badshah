@@ -291,7 +291,7 @@ export default function SettingsTab({
                     id="sPhone"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    placeholder="96939 99890"
+                    placeholder="77639 49496"
                     className="bg-slate-950/60 border-slate-800 text-white h-10 text-xs rounded-xl"
                   />
                   <p className="text-[10px] text-slate-400">
@@ -307,7 +307,7 @@ export default function SettingsTab({
                     id="sSecPhone"
                     value={secondaryPhone}
                     onChange={(e) => setSecondaryPhone(e.target.value)}
-                    placeholder="96939 99890"
+                    placeholder="77639 49496"
                     className="bg-slate-950/60 border-slate-800 text-white h-10 text-xs rounded-xl"
                   />
                   <p className="text-[10px] text-slate-400">

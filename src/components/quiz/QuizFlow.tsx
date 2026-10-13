@@ -67,7 +67,7 @@ export default function QuizFlow({
 
   const handleCopyPhone = (e: React.MouseEvent) => {
     e.stopPropagation()
-    const phoneToCopy = helplinePhone || '96939 99890'
+    const phoneToCopy = helplinePhone || '77639 49496'
     if (navigator.clipboard && phoneToCopy) {
       navigator.clipboard.writeText(phoneToCopy)
       setPhoneCopied(true)
@@ -332,7 +332,7 @@ export default function QuizFlow({
               </div>
               <div className="flex items-center justify-between gap-2 bg-white/95 p-2 sm:p-2.5 rounded-xl border border-amber-200 shadow-xs">
                 <a
-                  href={`tel:${(helplinePhone || '9693999890').replace(/\s+/g, '')}`}
+                  href={`tel:${(helplinePhone || '7763949496').replace(/\s+/g, '')}`}
                   className="flex items-center gap-2.5 text-stone-900 hover:text-amber-800 transition-colors flex-1"
                 >
                   <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-600 to-amber-500 text-white flex items-center justify-center shrink-0 shadow-sm shadow-amber-600/30">
@@ -340,7 +340,7 @@ export default function QuizFlow({
                   </div>
                   <div>
                     <span className="text-base sm:text-lg font-black tracking-wide text-stone-900 block leading-tight">
-                      +91 96939 99890
+                      +91 77639 49496
                     </span>
                     <span className="text-[10px] text-amber-700 font-semibold block">
                       Tap to call restaurant directly
@@ -366,12 +366,12 @@ export default function QuizFlow({
                   )}
                 </button>
               </div>
-              {/* Other Contact Numbers */}
+              {/* Helpline Note */}
               <div className="flex items-center justify-between text-[10px] text-stone-600 px-1 pt-0.5">
                 <span className="text-stone-500">Helpline:</span>
                 <div className="flex items-center gap-2">
-                  <a href="tel:9693999890" className="hover:text-amber-800 font-semibold hover:underline">
-                    96939 99890
+                  <a href="tel:7763949496" className="hover:text-amber-800 font-semibold hover:underline">
+                    77639 49496
                   </a>
                 </div>
               </div>
@@ -478,7 +478,7 @@ export default function QuizFlow({
           isOpen={isComplaintModalOpen}
           onClose={() => setIsComplaintModalOpen(false)}
           restaurantName={restaurantName}
-          helplinePhone={helplinePhone || '+91 96939 99890'}
+          helplinePhone={helplinePhone || '+91 77639 49496'}
           slug={slug}
         />
       </>

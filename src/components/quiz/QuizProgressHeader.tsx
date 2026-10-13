@@ -60,13 +60,13 @@ export default function QuizProgressHeader({
 
         <div className="flex items-center gap-2">
           <a
-            href="tel:9693999890"
+            href="tel:7763949496"
             className="flex items-center gap-1 text-[11px] font-bold text-amber-900 bg-amber-50 hover:bg-amber-100 px-2.5 py-1 rounded-full border border-amber-300 transition-colors shadow-2xs"
-            title="Helpline: +91 96939 99890"
+            title="Helpline: +91 77639 49496"
           >
             <Phone className="w-3 h-3 text-amber-700" />
             <span className="hidden sm:inline">Call:</span>
-            <span>96939 99890</span>
+            <span>77639 49496</span>
           </a>
           <div className="text-xs font-semibold text-stone-500 bg-stone-100 px-2.5 py-1 rounded-full border border-stone-200">
             Step <span className="text-amber-800 font-bold">{currentStep}</span> of {totalSteps}

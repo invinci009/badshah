@@ -21,13 +21,13 @@ describe('phone validation (format-only, never verified)', () => {
   it('accepts valid 10-digit numbers starting 6-9', () => {
     assert.equal(normalizeIndianPhone('9876543210'), '9876543210')
     assert.equal(normalizeIndianPhone('6123456789'), '6123456789')
-    assert.ok(isValidIndianPhone('9693999890'))
+    assert.ok(isValidIndianPhone('7763949496'))
   })
   it('normalizes +91, 91, 0 prefixes and separators', () => {
     assert.equal(normalizeIndianPhone('+91 98765 43210'), '9876543210')
     assert.equal(normalizeIndianPhone('91-9876543210'), '9876543210')
     assert.equal(normalizeIndianPhone('09876543210'), '9876543210')
-    assert.equal(normalizeIndianPhone('+91-96939-99890'), '9693999890')
+    assert.equal(normalizeIndianPhone('+91-77639-49496'), '7763949496')
   })
   it('rejects invalid formats', () => {
     assert.equal(normalizeIndianPhone('5876543210'), null) // starts with 5

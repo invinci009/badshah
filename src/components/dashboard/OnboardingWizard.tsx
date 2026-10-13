@@ -13,10 +13,10 @@ export default function OnboardingWizard() {
   const [step, setStep] = useState(1)
   const [name, setName] = useState('Biryani Badshah')
   const [location, setLocation] = useState('Phulwari Rd, Near Shaheed Bhagat Singh Chowk, Birla Colony, Phulwari Sharif, Patna, Bihar 801505')
-  const [phone, setPhone] = useState('96939 99890')
+  const [phone, setPhone] = useState('77639 49496')
   const [googleReviewUrl, setGoogleReviewUrl] = useState('')
   const [welcomeMessage, setWelcomeMessage] = useState(
-    'Thanks for dining with Biryani Badshah! We\'d love to hear about your royal experience today. For helpline & orders call 96939 99890.'
+    'Thanks for dining with Biryani Badshah! We\'d love to hear about your royal experience today. For helpline & orders call 77639 49496.'
   )
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)

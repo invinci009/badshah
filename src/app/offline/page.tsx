@@ -84,11 +84,11 @@ export default function OfflinePage() {
                 Biryani Badshah, Patna
               </div>
               <a
-                href="tel:9693999890"
+                href="tel:7763949496"
                 className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-[11px] font-bold text-amber-300 hover:bg-amber-500/25 transition-colors"
               >
                 <Phone className="w-3 h-3 text-amber-400" />
-                <span>Call: 96939 99890</span>
+                <span>Call: 77639 49496</span>
               </a>
             </div>
             <p className="text-[11px] text-slate-400 leading-tight">

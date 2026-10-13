@@ -38,7 +38,7 @@ export default function ComplaintModal({
   isOpen,
   onClose,
   restaurantName = 'Biryani Badshah',
-  helplinePhone = '+91 96939 99890',
+  helplinePhone = '+91 77639 49496',
   slug,
 }: ComplaintModalProps) {
   const [name, setName] = useState('')
@@ -190,19 +190,28 @@ export default function ComplaintModal({
                 )}
               </div>
 
-              <div className="pt-2 flex flex-col sm:flex-row gap-2 max-w-sm mx-auto">
-                <a
-                  href={`tel:${cleanPhone}`}
-                  className="flex-1 inline-flex items-center justify-center gap-2 h-11 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
-                >
-                  <Phone className="w-4 h-4" />
-                  <span>Call Helpline Now</span>
-                </a>
+              <div className="pt-2 space-y-2 max-w-sm mx-auto">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <a
+                    href="tel:8252782964"
+                    className="inline-flex items-center justify-center gap-1.5 h-11 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
+                  >
+                    <Phone className="w-3.5 h-3.5" />
+                    <span>Call 82527 82964</span>
+                  </a>
+                  <a
+                    href="tel:9693999890"
+                    className="inline-flex items-center justify-center gap-1.5 h-11 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
+                  >
+                    <Phone className="w-3.5 h-3.5" />
+                    <span>Call 96939 99890</span>
+                  </a>
+                </div>
 
                 <button
                   type="button"
                   onClick={handleResetAndClose}
-                  className="flex-1 inline-flex items-center justify-center h-11 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs transition-all cursor-pointer"
+                  className="w-full inline-flex items-center justify-center h-10 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs transition-all cursor-pointer"
                 >
                   Close
                 </button>
@@ -222,46 +231,52 @@ export default function ComplaintModal({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {/* Call Admin Directly */}
-                  <a
-                    href={`tel:${cleanPhone}`}
-                    className="flex items-center gap-3 p-3 rounded-2xl bg-amber-50/80 hover:bg-amber-100/90 border border-amber-200/80 text-amber-950 transition-all cursor-pointer group active:scale-[0.98]"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-md shadow-amber-500/20 group-hover:scale-105 transition-transform">
-                      <Phone className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-amber-950 flex items-center gap-1">
-                        <span>Call Admin</span>
-                        <ChevronRight className="w-3.5 h-3.5 text-amber-600 group-hover:translate-x-0.5 transition-transform" />
+                <div className="space-y-2">
+                  {[
+                    { label: 'Admin Escalation Desk 1', display: '+91 82527 82964', raw: '8252782964', intl: '918252782964' },
+                    { label: 'Admin Escalation Desk 2', display: '+91 96939 99890', raw: '9693999890', intl: '919693999890' },
+                  ].map((admin) => (
+                    <div
+                      key={admin.raw}
+                      className="p-3 rounded-2xl bg-gradient-to-r from-amber-50/90 via-amber-100/50 to-stone-50 border border-amber-200/90 flex items-center justify-between gap-2"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-9 h-9 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 shadow-sm shadow-amber-500/20">
+                          <Phone className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] font-bold text-amber-900 block uppercase tracking-wider">
+                            {admin.label}
+                          </span>
+                          <span className="text-xs sm:text-sm font-black text-stone-900 block truncate">
+                            {admin.display}
+                          </span>
+                        </div>
                       </div>
-                      <p className="text-[11px] text-amber-800/90 font-medium truncate">
-                        {helplinePhone}
-                      </p>
-                    </div>
-                  </a>
-
-                  {/* Text / WhatsApp Admin Directly */}
-                  <a
-                    href={whatsappUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-3 p-3 rounded-2xl bg-emerald-50/80 hover:bg-emerald-100/90 border border-emerald-200/80 text-emerald-950 transition-all cursor-pointer group active:scale-[0.98]"
-                  >
-                    <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-600/20 group-hover:scale-105 transition-transform">
-                      <MessageCircle className="w-4 h-4" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold text-emerald-950 flex items-center gap-1">
-                        <span>WhatsApp / Text</span>
-                        <ChevronRight className="w-3.5 h-3.5 text-emerald-600 group-hover:translate-x-0.5 transition-transform" />
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <a
+                          href={`tel:${admin.raw}`}
+                          className="px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95"
+                          title={`Call ${admin.display}`}
+                        >
+                          <Phone className="w-3.5 h-3.5" />
+                          <span>Call</span>
+                        </a>
+                        <a
+                          href={`https://wa.me/${admin.intl}?text=${encodeURIComponent(
+                            `Hello ${restaurantName} Management, I am dining at your restaurant and would like to report an urgent issue / complaint: `
+                          )}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-1 shadow-xs transition-all active:scale-95"
+                          title={`WhatsApp ${admin.display}`}
+                        >
+                          <MessageCircle className="w-3.5 h-3.5" />
+                          <span>WhatsApp</span>
+                        </a>
                       </div>
-                      <p className="text-[11px] text-emerald-800/90 font-medium truncate">
-                        Chat with Management
-                      </p>
                     </div>
-                  </a>
+                  ))}
                 </div>
               </div>
 

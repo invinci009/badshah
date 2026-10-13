@@ -76,11 +76,11 @@ export default function ThankYouCard({ restaurantName, slug }: ThankYouCardProps
         <div className="space-y-2.5 pt-1">
           {/* Primary: Direct Call to Restaurant */}
           <a
-            href="tel:9693999890"
+            href="tel:7763949496"
             className="w-full h-12 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-600 hover:from-amber-700 hover:to-yellow-700 text-white font-bold shadow-lg shadow-amber-600/25 flex items-center justify-center gap-2 text-sm transition-all duration-200 cursor-pointer active:scale-95"
           >
             <Phone className="w-4 h-4" />
-            <span>Call Restaurant: +91 96939 99890</span>
+            <span>Call Restaurant: +91 77639 49496</span>
           </a>
 
           {/* Secondary Buttons Row */}
