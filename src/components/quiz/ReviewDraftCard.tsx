@@ -50,12 +50,12 @@ export default function ReviewDraftCard({
         .then((data) => {
           setDraft(
             pickDraftText(data) ??
-              `Had a wonderful dining experience at ${restaurantName || 'PM Zaika Restaurant'} today! The food was flavorful and freshly prepared, and the service was warm and attentive. Highly recommended!`
+              `Had a wonderful dining experience at ${restaurantName || 'Biryani Badshah'} today! The food was flavorful and freshly prepared, and the service was warm and attentive. Highly recommended!`
           )
         })
         .catch((err) => {
           console.warn('Draft load error:', err)
-          setDraft(`Had a wonderful dining experience at ${restaurantName || 'PM Zaika Restaurant'} today! The food was flavorful and freshly prepared, and the service was warm and attentive. Highly recommended!`)
+          setDraft(`Had a wonderful dining experience at ${restaurantName || 'Biryani Badshah'} today! The food was flavorful and freshly prepared, and the service was warm and attentive. Highly recommended!`)
         })
         .finally(() => setIsLoadingDraft(false))
     }

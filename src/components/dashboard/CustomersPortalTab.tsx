@@ -129,7 +129,7 @@ export default function CustomersPortalTab({ customers, restaurantName }: Custom
     const encodedUri = encodeURI(csvContent)
     const link = document.createElement('a')
     link.setAttribute('href', encodedUri)
-    link.setAttribute('download', `pm-zaika-customers-${new Date().toISOString().slice(0, 10)}.csv`)
+    link.setAttribute('download', `biryani-badshah-customers-${new Date().toISOString().slice(0, 10)}.csv`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)

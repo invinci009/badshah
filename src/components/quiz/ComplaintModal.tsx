@@ -38,7 +38,7 @@ export default function ComplaintModal({
   isOpen,
   onClose,
   restaurantName = 'Biryani Badshah',
-  helplinePhone = '+91 74882 60572',
+  helplinePhone = '+91 96939 99890',
   slug,
 }: ComplaintModalProps) {
   const [name, setName] = useState('')

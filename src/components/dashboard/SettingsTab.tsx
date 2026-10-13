@@ -271,7 +271,7 @@ export default function SettingsTab({
                   id="sLoc"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
-                  placeholder="Shershah Road, Gur ki Mandi, Gulzarbagh, Patna"
+                  placeholder="Phulwari Rd, Near Shaheed Bhagat Singh Chowk, Birla Colony, Phulwari Sharif, Patna, Bihar 801505"
                   className="bg-slate-950/60 border-slate-800 text-white h-10 text-xs rounded-xl"
                 />
               </div>
@@ -291,7 +291,7 @@ export default function SettingsTab({
                     id="sPhone"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
-                    placeholder="7488260572"
+                    placeholder="96939 99890"
                     className="bg-slate-950/60 border-slate-800 text-white h-10 text-xs rounded-xl"
                   />
                   <p className="text-[10px] text-slate-400">
@@ -307,7 +307,7 @@ export default function SettingsTab({
                     id="sSecPhone"
                     value={secondaryPhone}
                     onChange={(e) => setSecondaryPhone(e.target.value)}
-                    placeholder="06123112128, 9525748843"
+                    placeholder="96939 99890"
                     className="bg-slate-950/60 border-slate-800 text-white h-10 text-xs rounded-xl"
                   />
                   <p className="text-[10px] text-slate-400">

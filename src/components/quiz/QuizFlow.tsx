@@ -67,8 +67,9 @@ export default function QuizFlow({
 
   const handleCopyPhone = (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (navigator.clipboard && helplinePhone) {
-      navigator.clipboard.writeText(helplinePhone)
+    const phoneToCopy = helplinePhone || '96939 99890'
+    if (navigator.clipboard && phoneToCopy) {
+      navigator.clipboard.writeText(phoneToCopy)
       setPhoneCopied(true)
       setTimeout(() => setPhoneCopied(false), 2500)
     }
@@ -304,17 +305,17 @@ export default function QuizFlow({
             {/* Restaurant Name & Subtitle */}
             <div className="space-y-1.5">
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-stone-900">
-                {restaurantName || 'PM Zaika Restaurant'}
+                {restaurantName || 'Biryani Badshah'}
               </h1>
               <p className="text-sm font-semibold text-amber-800">
-                पीएम ज़ायका रेस्टोरेंट • Authentic Biryani & Chinese
+                बिरयानी बादशाह • Royal Mughlai & Biryani
               </p>
               <div className="pt-1 flex items-center justify-center gap-2 text-xs text-stone-500">
                 <span className="flex items-center gap-1 font-semibold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200/60">
-                  <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" /> 4.5 • Zaika Special Dining
+                  <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" /> 4.5 • Royal Dining Experience
                 </span>
                 <span>•</span>
-                <span>Gulzarbagh, Patna</span>
+                <span>Phulwari Sharif, Patna</span>
               </div>
             </div>
 
@@ -331,7 +332,7 @@ export default function QuizFlow({
               </div>
               <div className="flex items-center justify-between gap-2 bg-white/95 p-2 sm:p-2.5 rounded-xl border border-amber-200 shadow-xs">
                 <a
-                  href="tel:7488260572"
+                  href={`tel:${(helplinePhone || '9693999890').replace(/\s+/g, '')}`}
                   className="flex items-center gap-2.5 text-stone-900 hover:text-amber-800 transition-colors flex-1"
                 >
                   <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-600 to-amber-500 text-white flex items-center justify-center shrink-0 shadow-sm shadow-amber-600/30">
@@ -339,7 +340,7 @@ export default function QuizFlow({
                   </div>
                   <div>
                     <span className="text-base sm:text-lg font-black tracking-wide text-stone-900 block leading-tight">
-                      +91 74882 60572
+                      +91 96939 99890
                     </span>
                     <span className="text-[10px] text-amber-700 font-semibold block">
                       Tap to call restaurant directly
@@ -367,11 +368,11 @@ export default function QuizFlow({
               </div>
               {/* Other Contact Numbers */}
               <div className="flex items-center justify-between text-[10px] text-stone-600 px-1 pt-0.5">
-                <span className="text-stone-500">Other Lines:</span>
+                <span className="text-stone-500">Helpline:</span>
                 <div className="flex items-center gap-2">
-                  <a href="tel:06123112128" className="hover:text-amber-800 font-semibold hover:underline">0612-3112128</a>
-                  <span>•</span>
-                  <a href="tel:9525748843" className="hover:text-amber-800 font-semibold hover:underline">9525748843</a>
+                  <a href="tel:9693999890" className="hover:text-amber-800 font-semibold hover:underline">
+                    96939 99890
+                  </a>
                 </div>
               </div>
             </div>
@@ -380,10 +381,10 @@ export default function QuizFlow({
             <div className="p-3 rounded-2xl bg-stone-50/90 border border-stone-200/90 text-left space-y-0.5">
               <div className="flex items-center gap-1.5 text-xs font-bold text-stone-900">
                 <MapPin className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                <span>Shershah Road, Gur ki Mandi, Patna</span>
+                <span>Phulwari Rd, Near Shaheed Bhagat Singh Chowk</span>
               </div>
               <p className="text-[11px] text-stone-600 pl-5 leading-relaxed">
-                Infront of Bank of India, PO - Gulzarbagh, Patna - 800007
+                Birla Colony, Phulwari Sharif, Patna, Bihar 801505
               </p>
             </div>
 
@@ -477,7 +478,7 @@ export default function QuizFlow({
           isOpen={isComplaintModalOpen}
           onClose={() => setIsComplaintModalOpen(false)}
           restaurantName={restaurantName}
-          helplinePhone={helplinePhone || '+91 74882 60572'}
+          helplinePhone={helplinePhone || '+91 96939 99890'}
           slug={slug}
         />
       </>

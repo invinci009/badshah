@@ -44,8 +44,8 @@ export default function manifest(): MetadataRoute.Manifest {
       {
         name: 'Guest Feedback Survey',
         short_name: 'Feedback',
-        description: 'Open customer survey experience for PM Zaika Restaurant',
-        url: '/r/pm-zaika',
+        description: 'Open customer survey experience for Biryani Badshah',
+        url: '/r/biryani-badshah-patna',
         icons: [{ src: '/icons/icon-192x192.png', sizes: '192x192' }],
       },
       {

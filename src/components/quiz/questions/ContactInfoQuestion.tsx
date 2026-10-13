@@ -181,7 +181,7 @@ export default function ContactInfoQuestion({
               Receive updates on WhatsApp
             </span>
             <span className="text-[11px] text-stone-500 block">
-              Get notified about special dining offers, new Zaika menu items &amp; festive discounts. Unsubscribe anytime.
+              Get notified about special dining offers, new Biryani Badshah royal menu items &amp; festive discounts. Unsubscribe anytime.
             </span>
           </div>
         </label>

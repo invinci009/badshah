@@ -14,8 +14,8 @@ export default function ThankYouCard({ restaurantName, slug }: ThankYouCardProps
     if (navigator.share) {
       try {
         await navigator.share({
-          title: `${restaurantName} — Authentic Dining Experience`,
-          text: `Check out ${restaurantName} on Shershah Road, Gur ki Mandi, Gulzarbagh, Patna!`,
+          title: `${restaurantName} — Royal Indian Dining & Ordering`,
+          text: `Check out ${restaurantName} on Phulwari Rd, Near Shaheed Bhagat Singh Chowk, Birla Colony, Phulwari Sharif, Patna, Bihar 801505!`,
           url,
         })
       } catch {}
@@ -51,7 +51,7 @@ export default function ThankYouCard({ restaurantName, slug }: ThankYouCardProps
 
           <p className="text-xs sm:text-sm text-stone-600 leading-relaxed max-w-xs mx-auto">
             Your honest thoughts help the chef and team at{' '}
-            <strong className="text-stone-800 font-semibold">{restaurantName || 'PM Zaika Restaurant'}</strong> maintain
+            <strong className="text-stone-800 font-semibold">{restaurantName || 'Biryani Badshah'}</strong> maintain
             the highest culinary standard.
           </p>
         </div>
@@ -68,7 +68,7 @@ export default function ThankYouCard({ restaurantName, slug }: ThankYouCardProps
             </span>
           </div>
           <p className="text-xs text-stone-600 leading-relaxed">
-            Our management team and kitchen staff review every response to continually perfect our recipes, zaika delicacies, and hospitality. We look forward to hosting you again soon!
+            Our management team and kitchen staff review every response to continually perfect our royal recipes, biryani delicacies, and hospitality. We look forward to hosting you again soon!
           </p>
         </div>
 
@@ -76,17 +76,17 @@ export default function ThankYouCard({ restaurantName, slug }: ThankYouCardProps
         <div className="space-y-2.5 pt-1">
           {/* Primary: Direct Call to Restaurant */}
           <a
-            href="tel:7488260572"
+            href="tel:9693999890"
             className="w-full h-12 rounded-xl bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-600 hover:from-amber-700 hover:to-yellow-700 text-white font-bold shadow-lg shadow-amber-600/25 flex items-center justify-center gap-2 text-sm transition-all duration-200 cursor-pointer active:scale-95"
           >
             <Phone className="w-4 h-4" />
-            <span>Call Restaurant: +91 74882 60572</span>
+            <span>Call Restaurant: +91 96939 99890</span>
           </a>
 
           {/* Secondary Buttons Row */}
           <div className="grid grid-cols-2 gap-2">
             <a
-              href="https://www.google.com/maps/place/?q=place_id:ChIJ52esmZNf7TkRoznWIQnz7uo"
+              href="https://www.google.com/maps/place/?q=place_id:ChIJv4XCqyuo8jkRSKhDFGoClDo"
               target="_blank"
               rel="noopener noreferrer"
               className="h-11 px-3 rounded-xl bg-stone-50 hover:bg-stone-100 border border-stone-200/90 text-stone-700 hover:text-stone-900 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-2xs"
