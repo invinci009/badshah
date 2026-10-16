@@ -14,8 +14,17 @@ interface CacheEntry<T> {
   cachedAt: number
 }
 
-const memoryStore = new Map<string, CacheEntry<unknown>>()
-const inFlightRequests = new Map<string, Promise<unknown>>()
+// Attach cache stores to globalThis so they are truly shared across all
+// Server Component bundles, Route Handlers, and survives Next.js fast-refresh / module re-evaluations.
+declare global {
+  // eslint-disable-next-line no-var
+  var __rp_memoryStore: Map<string, CacheEntry<unknown>> | undefined
+  // eslint-disable-next-line no-var
+  var __rp_inFlightRequests: Map<string, Promise<unknown>> | undefined
+}
+
+const memoryStore = (globalThis.__rp_memoryStore ??= new Map<string, CacheEntry<unknown>>())
+const inFlightRequests = (globalThis.__rp_inFlightRequests ??= new Map<string, Promise<unknown>>())
 
 /**
  * Retrieve cached value if valid, or coalesce and execute `fetcher` and cache result.
@@ -34,7 +43,7 @@ export async function getCached<T>(
   const now = Date.now()
   const existing = memoryStore.get(key) as CacheEntry<T> | undefined
 
-  // Fast-path: local memory cache is fresh
+  // Fast-path: local memory cache is fresh - ZERO DB reads!
   if (existing && existing.expiresAt > now) {
     return existing.data
   }

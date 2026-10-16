@@ -44,6 +44,22 @@ export async function GET(request: NextRequest) {
           (o.tableLabel || '').toLowerCase().includes(q)
       )
     }
+    // Compute lightweight ETag based on order count and the latest order timestamp
+    const latestTimestamp = orders[0]?.updatedAt || orders[0]?.createdAt || '0'
+    const latestId = orders[0]?.id || '0'
+    const etag = `W/"${orders.length}-${latestId}-${latestTimestamp}"`
+
+    const ifNoneMatch = request.headers.get('if-none-match')
+    if (ifNoneMatch && ifNoneMatch === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          'Cache-Control': 'private, no-cache',
+        },
+      })
+    }
+
     // Return order rows including items to avoid N+1 fetches from kitchen and detail views
     return NextResponse.json(
       orders.map((o) => ({
@@ -66,7 +82,13 @@ export async function GET(request: NextRequest) {
         notes: o.notes,
         createdAt: o.createdAt,
       })),
-      { status: 200 }
+      {
+        status: 200,
+        headers: {
+          ETag: etag,
+          'Cache-Control': 'private, no-cache',
+        },
+      }
     )
   } catch (error) {
     console.error('Business orders GET error:', error)

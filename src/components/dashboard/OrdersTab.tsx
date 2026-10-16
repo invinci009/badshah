@@ -30,6 +30,7 @@ import {
   VolumeX,
 } from 'lucide-react'
 import { formatPaise, formatTableDisplay } from '@/lib/ordering/rules.mjs'
+import { useOrderAnnouncer } from './OrderAnnouncerContext'
 
 interface OrderRow {
   id: string
@@ -156,54 +157,12 @@ export default function OrdersTab({
   const [payKind, setPayKind] = useState<'collection' | 'refund'>('collection')
 
   // Notification message & live arrivals
+  const { isVoiceEnabled, toggleVoice, announceOrderDirectly } = useOrderAnnouncer()
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
   const [justArrivedCount, setJustArrivedCount] = useState(0)
-  const [soundEnabled, setSoundEnabled] = useState(true)
-  const audioCtxRef = useRef<AudioContext | null>(null)
   const prevIds = useRef<Set<string>>(new Set())
   const newOrderIdsRef = useRef<Set<string>>(new Set())
-
-  const playChime = useCallback(() => {
-    if (!soundEnabled || typeof window === 'undefined') return
-    try {
-      if (!audioCtxRef.current) {
-        const AC =
-          window.AudioContext ||
-          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-        if (AC) audioCtxRef.current = new AC()
-      }
-      const ctx = audioCtxRef.current
-      if (ctx) {
-        if (ctx.state === 'suspended') {
-          ctx.resume()
-        }
-        const now = ctx.currentTime
-        const osc1 = ctx.createOscillator()
-        const gain1 = ctx.createGain()
-        osc1.type = 'sine'
-        osc1.frequency.setValueAtTime(587.33, now)
-        gain1.gain.setValueAtTime(0.15, now)
-        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.3)
-        osc1.connect(gain1)
-        gain1.connect(ctx.destination)
-        osc1.start(now)
-        osc1.stop(now + 0.3)
-
-        const osc2 = ctx.createOscillator()
-        const gain2 = ctx.createGain()
-        osc2.type = 'sine'
-        osc2.frequency.setValueAtTime(880, now + 0.1)
-        gain2.gain.setValueAtTime(0.15, now + 0.1)
-        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.5)
-        osc2.connect(gain2)
-        gain2.connect(ctx.destination)
-        osc2.start(now + 0.1)
-        osc2.stop(now + 0.5)
-      }
-    } catch {
-      // audio unavailable
-    }
-  }, [soundEnabled])
+  const ordersEtagRef = useRef<string | null>(null)
 
   const fetchOrders = useCallback(
     async (silent = false) => {
@@ -214,11 +173,25 @@ export default function OrdersTab({
         if (tableFilter !== 'all') params.set('tableId', tableFilter)
         if (search.trim()) params.set('q', search.trim())
         params.set('limit', statusFilter === 'active' ? '30' : '60')
-        const res = await fetch(`/api/business/orders?${params.toString()}`)
+
+        const headers: Record<string, string> = { 'Cache-Control': 'no-cache' }
+        if (silent && ordersEtagRef.current) {
+          headers['If-None-Match'] = ordersEtagRef.current
+        }
+
+        const res = await fetch(`/api/business/orders?${params.toString()}`, { headers })
+        if (res.status === 304) {
+          // Zero changes on server — skip re-rendering and JSON parsing!
+          return
+        }
         if (res.status === 401) {
           window.location.href = '/login'
           return
         }
+
+        const newEtag = res.headers.get('ETag')
+        if (newEtag) ordersEtagRef.current = newEtag
+
         const data = await res.json()
         if (res.ok && Array.isArray(data)) {
           const ids = new Set(data.map((o: OrderRow) => o.id))
@@ -227,9 +200,17 @@ export default function OrdersTab({
               (o: OrderRow) => !prevIds.current.has(o.id) && o.fulfilment === 'RECEIVED'
             )
             if (fresh.length > 0) {
-              fresh.forEach((o) => newOrderIdsRef.current.add(o.id))
+              fresh.forEach((o) => {
+                newOrderIdsRef.current.add(o.id)
+                announceOrderDirectly({
+                  id: o.id,
+                  orderNumber: o.orderNumber,
+                  tableLabel: o.tableLabel,
+                  totalPaise: o.totalPaise,
+                  fulfilment: o.fulfilment,
+                })
+              })
               setJustArrivedCount(fresh.length)
-              playChime()
               setTimeout(() => {
                 setJustArrivedCount(0)
               }, 5000)
@@ -244,7 +225,7 @@ export default function OrdersTab({
         if (!silent) setLoading(false)
       }
     },
-    [search, tableFilter, statusFilter, playChime]
+    [search, tableFilter, statusFilter, announceOrderDirectly]
   )
 
   useEffect(() => {
@@ -662,16 +643,16 @@ export default function OrdersTab({
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setSoundEnabled((v) => !v)}
+            onClick={() => toggleVoice()}
             className={`p-2 rounded-xl border text-xs font-semibold cursor-pointer transition-colors flex items-center gap-1.5 ${
-              soundEnabled
+              isVoiceEnabled
                 ? 'bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25'
                 : 'bg-slate-800/80 border-slate-700 text-slate-400 hover:text-slate-200'
             }`}
-            title={soundEnabled ? 'Order sound alert enabled (tap to mute)' : 'Order sound muted (tap to enable)'}
+            title={isVoiceEnabled ? 'Order voice announcement enabled (tap to mute)' : 'Order voice muted (tap to enable)'}
           >
-            {soundEnabled ? <Volume2 className="w-4 h-4 text-amber-400" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
-            <span className="text-[11px] hidden sm:inline">{soundEnabled ? 'Alerts ON' : 'Muted'}</span>
+            {isVoiceEnabled ? <Volume2 className="w-4 h-4 text-amber-400" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
+            <span className="text-[11px] hidden sm:inline">{isVoiceEnabled ? 'Voice ON' : 'Muted'}</span>
           </button>
           <button
             type="button"

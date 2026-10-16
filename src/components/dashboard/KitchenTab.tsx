@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChefHat, Volume2, VolumeX, Loader2, BellRing, Check } from 'lucide-react'
 import { formatTableDisplay } from '@/lib/ordering/rules.mjs'
+import { useOrderAnnouncer } from './OrderAnnouncerContext'
 
 interface KOrder {
   id: string
@@ -43,78 +44,84 @@ function ageMin(createdAt: string) {
 }
 
 export default function KitchenTab() {
+  const { isVoiceEnabled, toggleVoice, announceOrderDirectly, refreshActiveOrders } = useOrderAnnouncer()
   const [orders, setOrders] = useState<KOrder[]>([])
   const [details, setDetails] = useState<Map<string, KDetail>>(new Map())
   const detailsRef = useRef<Map<string, KDetail>>(new Map())
   const [requests, setRequests] = useState<StaffCall[]>([])
-  const [sound, setSound] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const prevCount = useRef(0)
-  const audioRef = useRef<AudioContext | null>(null)
-
-  const beep = useCallback(() => {
-    if (!sound) return
-    try {
-      if (!audioRef.current) {
-        const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
-        audioRef.current = new AC()
-      }
-      const ctx = audioRef.current
-      const osc = ctx.createOscillator()
-      const gain = ctx.createGain()
-      osc.connect(gain)
-      gain.connect(ctx.destination)
-      osc.frequency.value = 880
-      gain.gain.value = 0.15
-      osc.start()
-      osc.stop(ctx.currentTime + 0.4)
-    } catch { /* audio unavailable */ }
-  }, [sound])
+  const ordersEtagRef = useRef<string | null>(null)
 
   const load = useCallback(async () => {
     try {
+      const headers: Record<string, string> = { 'Cache-Control': 'no-cache' }
+      if (ordersEtagRef.current) {
+        headers['If-None-Match'] = ordersEtagRef.current
+      }
+
       const [oRes, sRes] = await Promise.all([
-        fetch('/api/business/orders?status=active&limit=30'),
+        fetch('/api/business/orders?status=active&limit=30', { headers }),
         fetch('/api/business/service-requests?status=OPEN'),
       ])
       if (oRes.status === 401 || sRes.status === 401) {
         window.location.href = '/login'
         return
       }
-      const oData = await oRes.json()
-      if (oRes.ok && Array.isArray(oData)) {
-        const active = oData.filter((o: KOrder) => ['RECEIVED', 'ACCEPTED', 'PREPARING'].includes(o.fulfilment))
-        const newOnes = active.filter((o: KOrder) => o.fulfilment === 'RECEIVED').length
-        if (prevCount.current > 0 && newOnes > prevCount.current) beep()
-        prevCount.current = newOnes
-        setOrders(active)
-        setError(null)
-        // Order rows now include items directly — zero extra N+1 reads
-        for (const o of active) {
-          if (o.items) {
-            detailsRef.current.set(o.id, {
-              order: {
+
+      if (oRes.status !== 304 && oRes.ok) {
+        const newEtag = oRes.headers.get('ETag')
+        if (newEtag) ordersEtagRef.current = newEtag
+
+        const oData = await oRes.json()
+        if (Array.isArray(oData)) {
+          const active = oData.filter((o: KOrder) => ['RECEIVED', 'ACCEPTED', 'PREPARING'].includes(o.fulfilment))
+          const receivedOrders = active.filter((o: KOrder) => o.fulfilment === 'RECEIVED')
+
+          // Announce incoming orders automatically via Hindi voice
+          if (prevCount.current > 0) {
+            receivedOrders.forEach((o) => {
+              announceOrderDirectly({
                 id: o.id,
                 orderNumber: o.orderNumber,
-                items: o.items,
-                notes: o.notes,
-                customerName: o.customerName,
                 tableLabel: o.tableLabel,
                 fulfilment: o.fulfilment,
-                createdAt: o.createdAt,
-              },
+              })
             })
           }
+          prevCount.current = receivedOrders.length
+          setOrders(active)
+          setError(null)
+          // Order rows now include items directly — zero extra N+1 reads
+          for (const o of active) {
+            if (o.items) {
+              detailsRef.current.set(o.id, {
+                order: {
+                  id: o.id,
+                  orderNumber: o.orderNumber,
+                  items: o.items,
+                  notes: o.notes,
+                  customerName: o.customerName,
+                  tableLabel: o.tableLabel,
+                  fulfilment: o.fulfilment,
+                  createdAt: o.createdAt,
+                },
+              })
+            }
+          }
+          setDetails(new Map(detailsRef.current))
         }
-        setDetails(new Map(detailsRef.current))
       }
-      const sData = await sRes.json()
-      if (sRes.ok && Array.isArray(sData)) setRequests(sData)
+
+      if (sRes.ok) {
+        const sData = await sRes.json()
+        if (Array.isArray(sData)) setRequests(sData)
+      }
     } catch {
       setError('Failed to load kitchen data — retrying…')
     }
-  }, [beep])
+  }, [announceOrderDirectly])
 
   useEffect(() => {
     load()
@@ -158,6 +165,7 @@ export default function KitchenTab() {
       detailsRef.current.delete(id)
       setDetails(new Map(detailsRef.current))
       load()
+      refreshActiveOrders()
     } catch (e) {
       window.alert(e instanceof Error ? e.message : 'Failed to update order status')
     } finally {
@@ -196,11 +204,16 @@ export default function KitchenTab() {
         </h2>
         <button
           type="button"
-          onClick={() => setSound(!sound)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer ${sound ? 'bg-emerald-600 text-white' : 'bg-slate-800 text-slate-300'}`}
+          onClick={() => toggleVoice()}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+            isVoiceEnabled
+              ? 'bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25'
+              : 'bg-slate-800 text-slate-400 border border-slate-700/60 hover:text-slate-200'
+          }`}
+          title={isVoiceEnabled ? 'Hindi voice announcement enabled (tap to mute)' : 'Voice alerts muted (tap to enable)'}
         >
-          {sound ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-          {sound ? 'Sound on' : 'Sound off'}
+          {isVoiceEnabled ? <Volume2 className="w-4 h-4 text-amber-400" /> : <VolumeX className="w-4 h-4 text-slate-400" />}
+          <span>{isVoiceEnabled ? 'Voice ON' : 'Muted'}</span>
         </button>
       </div>
 

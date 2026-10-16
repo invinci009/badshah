@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import OverviewTab, { type AnalyticsData } from './OverviewTab'
 import CampaignsTab, { type CampaignItem } from './CampaignsTab'
@@ -16,6 +16,8 @@ import SettingsTab, { type BusinessSettings } from './SettingsTab'
 import CustomersPortalTab, { type CustomerDetail } from './CustomersPortalTab'
 import MobileBottomNav from './MobileBottomNav'
 import MobileMenuDrawer from './MobileMenuDrawer'
+import { OrderAnnouncerProvider } from './OrderAnnouncerContext'
+import OrderAnnouncerBar from './OrderAnnouncerBar'
 import { usePwa } from '@/components/pwa/PwaProvider'
 import {
   LayoutDashboard,
@@ -134,7 +136,8 @@ export default function DashboardWorkspace({
   ]
 
   return (
-    <div className="space-y-4 sm:space-y-6 pb-safe-nav md:pb-6">
+    <OrderAnnouncerProvider>
+      <div className="space-y-4 sm:space-y-6 pb-safe-nav md:pb-6">
       {/* Restaurant Header */}
       <div className="space-y-3 pb-3 border-b border-slate-800/80">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
@@ -233,6 +236,9 @@ export default function DashboardWorkspace({
         </div>
       </div>
 
+      {/* Real-time Order Voice & Notifications Bar */}
+      <OrderAnnouncerBar onNavigateToOrders={() => handleTabChange('orders')} />
+
       {/* Tab Panels */}
       <div className="min-w-0">
         {activeTab === 'overview' && <OverviewTab analytics={analytics} />}
@@ -280,6 +286,7 @@ export default function DashboardWorkspace({
         restaurantName={business.name}
         restaurantLocation={business.location || undefined}
       />
-    </div>
+      </div>
+    </OrderAnnouncerProvider>
   )
 }

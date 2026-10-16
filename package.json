@@ -7,17 +7,21 @@
     "build": "node --require ./scripts/fat32-readlink-shim.cjs node_modules/next/dist/bin/next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test tests/ordering.test.mjs",
+    "test": "node --test tests/ordering.test.mjs tests/hindi-announcement.test.mjs",
     "change-password": "node scripts/change-password.js",
     "client:validate": "node scripts/validate-client.js",
     "client:build": "node scripts/deploy-client.js",
     "client:deploy": "node scripts/deploy-client.js",
     "firebase:seed": "node scripts/seed-firebase.js",
     "firebase:emulate": "firebase emulators:start",
-    "firebase:deploy": "firebase deploy"
+    "firebase:deploy": "firebase deploy",
+    "cap:sync": "npx cap sync android",
+    "cap:open": "npx cap open android"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/core": "^8.5.3",
     "@opentelemetry/api": "^1.9.1",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.116.0",
@@ -43,6 +47,7 @@
     "jose": "5.10.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",

@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="hi" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <title>Badshah Orders</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#020617" />
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #020617;
+      color: #f8fafc;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      text-align: center;
+      padding: 24px;
+      box-sizing: border-box;
+    }
+    .loader {
+      width: 48px;
+      height: 48px;
+      border: 4px solid rgba(245, 158, 11, 0.2);
+      border-top-color: #f59e0b;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 20px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    h1 {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin: 0 0 8px 0;
+      color: #ffffff;
+    }
+    p {
+      font-size: 0.875rem;
+      color: #94a3b8;
+      margin: 0 0 16px 0;
+    }
+    .btn {
+      display: inline-block;
+      padding: 10px 20px;
+      background: #d97706;
+      color: #ffffff;
+      text-decoration: none;
+      font-size: 0.875rem;
+      font-weight: 600;
+      border-radius: 10px;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(217, 119, 6, 0.3);
+    }
+  </style>
+</head>
+<body>
+  <div class="loader"></div>
+  <h1>Badshah Restaurant Orders</h1>
+  <p id="status-text">डैशबोर्ड लोड हो रहा है…</p>
+  <a id="retry-btn" class="btn" href="https://biriyani-badshah.vercel.app/dashboard#orders" style="display: none;">
+    डैशबोर्ड खोलें (Open Dashboard)
+  </a>
+  <script>
+    const TARGET = 'https://biriyani-badshah.vercel.app/dashboard#orders';
+    try {
+      window.location.replace(TARGET);
+    } catch (e) {
+      window.location.href = TARGET;
+    }
+    // If not redirected after 3 seconds, show fallback link
+    setTimeout(function() {
+      var btn = document.getElementById('retry-btn');
+      if (btn) btn.style.display = 'inline-block';
+      var txt = document.getElementById('status-text');
+      if (txt) txt.textContent = 'नेटवर्क कनेक्शन चेक करें या नीचे बटन दबाएं:';
+    }, 3000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Badshah Orders</string>
+    <string name="title_activity_main">Badshah Orders</string>
+    <string name="package_name">com.badshah.orders</string>
+    <string name="custom_url_scheme">com.badshah.orders</string>
+</resources>

@@ -2,6 +2,7 @@ import 'server-only'
 import type { Firestore } from 'firebase-admin/firestore'
 import { getAdminFirestore } from './admin'
 import { getCached, invalidateCache } from '../cache'
+import { sendMobileOrderAlarm } from '../server/pushNotifier'
 
 // ==============================================================================
 // Ordering persistence (Firestore, Admin SDK, server-only).
@@ -529,32 +530,39 @@ export async function getOrder(id: string): Promise<Order | null> {
 }
 
 export async function getOrders(limit = 100): Promise<Order[]> {
-  const snap = await getDb().collection('orders').orderBy('createdAt', 'desc').limit(limit).get()
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+  const canonical = await getCached('orders:all:canonical', 6000, async () => {
+    const snap = await getDb().collection('orders').orderBy('createdAt', 'desc').limit(100).get()
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+  })
+  return canonical.slice(0, limit)
 }
 
 /** Query only currently active kitchen/service orders to avoid full collection scans. */
 export async function getActiveOrders(limit = 50): Promise<Order[]> {
-  return getCached(`orders:active:${limit}`, 3000, async () => {
+  const canonical = await getCached('orders:active:canonical', 6000, async () => {
     const snap = await getDb()
       .collection('orders')
       .where('fulfilment', 'in', ['RECEIVED', 'ACCEPTED', 'PREPARING', 'READY'])
-      .limit(limit)
+      .limit(60)
       .get()
     const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
     return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
   })
+  return canonical.slice(0, limit)
 }
 
 /** Query orders by specific fulfilment status (e.g. SERVED, CANCELLED) with indexing. */
 export async function getOrdersByFulfilment(status: FulfilmentStatus, limit = 50): Promise<Order[]> {
-  const snap = await getDb()
-    .collection('orders')
-    .where('fulfilment', '==', status)
-    .limit(limit)
-    .get()
-  const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
-  return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+  const list = await getCached(`orders:fulfilment:${status}`, 6000, async () => {
+    const snap = await getDb()
+      .collection('orders')
+      .where('fulfilment', '==', status)
+      .limit(60)
+      .get()
+    const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+    return docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+  })
+  return list.slice(0, limit)
 }
 
 /** Efficient query for active orders at a specific table (reads max 5 docs instead of entire history). */
@@ -600,7 +608,18 @@ export async function createOrder(data: Omit<Order, 'id'>): Promise<Order> {
       .catch(() => {})
     invalidateCache('tables:all')
   }
-  invalidateCache('orders:active')
+  invalidateCache('orders:')
+
+  // Trigger loud mobile push alarm (ntfy / Swiggy style alert)
+  sendMobileOrderAlarm({
+    orderNumber: data.orderNumber,
+    tableLabel: data.tableLabel,
+    totalPaise: data.totalPaise,
+    items: data.items,
+  }).catch((err) => {
+    console.warn('[PushNotifier] Error sending mobile alarm:', err)
+  })
+
   return { id: ref.id, ...data } as Order
 }
 
@@ -664,7 +683,7 @@ export async function transitionOrderStatus(
     }
   }
 
-  invalidateCache('orders:active')
+  invalidateCache('orders:')
   return updated
 }
 
@@ -721,6 +740,7 @@ export async function updateOrder(
     }
   }
 
+  invalidateCache('orders:')
   const updatedSnap = await ref.get()
   return { id: updatedSnap.id, ...updatedSnap.data() } as Order
 }
@@ -786,6 +806,7 @@ export async function recordPaymentEntry(data: {
     })
     return { ...order, paidPaise: paid, refundedPaise: refunded, paymentStatus }
   })
+  invalidateCache('orders:')
   return updated
 }
 
@@ -873,25 +894,31 @@ export async function createServiceRequest(data: {
     resolvedAt: null,
   }
   await ref.set(stripUndefined({ ...req }))
+  invalidateCache('serviceRequests')
   return { id: ref.id, ...req } as ServiceRequest
 }
 
 export async function getServiceRequests(status?: string, limit = 50): Promise<ServiceRequest[]> {
-  if (status) {
-    const snap = await getDb()
-      .collection('serviceRequests')
-      .where('status', '==', status)
-      .limit(limit)
-      .get()
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)
-    return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-  }
-  const snap = await getDb().collection('serviceRequests').orderBy('createdAt', 'desc').limit(limit).get()
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)
+  const cacheKey = status ? `serviceRequests:${status}` : 'serviceRequests:all'
+  const list = await getCached(cacheKey, 6000, async () => {
+    if (status) {
+      const snap = await getDb()
+        .collection('serviceRequests')
+        .where('status', '==', status)
+        .limit(50)
+        .get()
+      const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)
+      return docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    }
+    const snap = await getDb().collection('serviceRequests').orderBy('createdAt', 'desc').limit(50).get()
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)
+  })
+  return list.slice(0, limit)
 }
 
 export async function updateServiceRequest(id: string, status: ServiceRequest['status']): Promise<void> {
   const updates: Record<string, unknown> = { status, updatedAt: serverNow() }
   if (status === 'RESOLVED' || status === 'CANCELLED') updates.resolvedAt = serverNow()
   await getDb().doc(`serviceRequests/${id}`).update(updates)
+  invalidateCache('serviceRequests')
 }
