@@ -223,13 +223,9 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
     []
   )
 
-  // Real-time Background Order Poller with ETag 304 & Tab Visibility Awareness
+  // Real-time Background Order Poller with ETag 304 (runs in foreground & background)
   const pollActiveOrders = useCallback(async (bypassEtag = false) => {
     try {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible' && !bypassEtag) {
-        return
-      }
-
       setIsSyncing(true)
       const headers: Record<string, string> = { 'Cache-Control': 'no-cache' }
       if (etagRef.current && !bypassEtag) {
@@ -307,11 +303,9 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
   useEffect(() => {
     pollActiveOrders(true)
 
-    // Poll every 10 seconds when tab is active (with 304 ETag, cost is near zero)
+    // Poll every 10 seconds for real-time order arrival (foreground & background)
     const interval = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        pollActiveOrders()
-      }
+      pollActiveOrders()
     }, 10000)
 
     // Immediate sync when tab gains visibility or window focus

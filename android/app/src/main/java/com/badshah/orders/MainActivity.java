@@ -36,6 +36,18 @@ public class MainActivity extends BridgeActivity {
             }
         });
 
+        // Start foreground background service to keep orders active in background
+        try {
+            android.content.Intent serviceIntent = new android.content.Intent(this, OrderBackgroundService.class);
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent);
+            } else {
+                startService(serviceIntent);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
         if (this.bridge != null && this.bridge.getWebView() != null) {
             WebSettings settings = this.bridge.getWebView().getSettings();
             // Allow auto-playing Hindi chime & speech announcements without requiring touch gestures
@@ -66,6 +78,15 @@ public class MainActivity extends BridgeActivity {
                     }
                 }
             }, "AndroidTTS");
+        }
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        // Keep JavaScript timers and background order announcements running when minimized or screen off
+        if (this.bridge != null && this.bridge.getWebView() != null) {
+            this.bridge.getWebView().resumeTimers();
         }
     }
 
