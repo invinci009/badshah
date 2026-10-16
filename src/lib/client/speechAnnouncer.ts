@@ -8,6 +8,16 @@
 
 import { getHindiTableAnnouncement } from '../ordering/hindiAnnouncement.mjs'
 
+declare global {
+  interface Window {
+    AndroidTTS?: {
+      speak: (text: string) => void
+      isAvailable: () => boolean
+      stop: () => void
+    }
+  }
+}
+
 export interface VoiceEngineStatus {
   supported: boolean
   hasHindiVoice: boolean
@@ -205,20 +215,35 @@ export function getVoiceEngineStatus(): VoiceEngineStatus {
     }
   }
 
-  const supported = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window
-  const { voice, isHindi } = findBestVoice()
-
+  // 1. Check for Android Native Bridge
+  const hasAndroidTTS = !!(window.AndroidTTS && typeof window.AndroidTTS.speak === 'function')
   let notificationPermission: NotificationPermission | 'unsupported' = 'unsupported'
   if ('Notification' in window) {
     notificationPermission = Notification.permission
   }
 
+  if (hasAndroidTTS) {
+    return {
+      supported: true,
+      hasHindiVoice: true,
+      activeVoiceName: 'Android Google TTS (Hindi)',
+      activeVoiceLang: 'hi-IN',
+      isFallback: false,
+      audioUnlocked: true,
+      notificationPermission,
+    }
+  }
+
+  // 2. Standard Web Speech API
+  const hasSpeechSynthesis = 'speechSynthesis' in window && 'SpeechSynthesisUtterance' in window
+  const { voice, isHindi } = findBestVoice()
+
   return {
-    supported,
-    hasHindiVoice: isHindi,
-    activeVoiceName: voice ? voice.name : null,
-    activeVoiceLang: voice ? voice.lang : null,
-    isFallback: !isHindi,
+    supported: hasSpeechSynthesis || true, // Audio fallback always available
+    hasHindiVoice: isHindi || hasAndroidTTS,
+    activeVoiceName: voice ? voice.name : hasAndroidTTS ? 'Android Google TTS' : 'Audio TTS',
+    activeVoiceLang: voice ? voice.lang : 'hi-IN',
+    isFallback: !isHindi && !hasAndroidTTS,
     audioUnlocked: isAudioUnlocked,
     notificationPermission,
   }
@@ -244,13 +269,13 @@ export interface AnnounceOrderHindiOptions {
 }
 
 /**
- * Announce Hindi order arrival via Web Speech API with dual-tone chime and specific items.
+ * Announce Hindi order arrival via Android Native TTS, Web Speech API, or HTML5 Audio stream.
  */
 export async function announceOrderInHindi(
   tableLabelOrConfig?: string | number | null | AnnounceOrderHindiOptions,
   legacyOptions?: AnnounceOrderHindiOptions
 ): Promise<boolean> {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+  if (typeof window === 'undefined') {
     return false
   }
 
@@ -270,70 +295,99 @@ export async function announceOrderInHindi(
 
   const text = getHindiTableAnnouncement({ tableLabel, items })
 
+  // Play double-tone restaurant chime before speaking
   if (options?.playChimeFirst !== false) {
     await playRestaurantChime(options?.volume !== undefined ? options.volume * 0.25 : 0.2)
   }
 
-  return new Promise((resolve) => {
+  // 1. Android Native TTS Bridge (runs on Android app WebView)
+  if (window.AndroidTTS && typeof window.AndroidTTS.speak === 'function') {
     try {
-      const synth = window.speechSynthesis
-
-      // Chrome bug workaround: resume synth if it became paused
-      if (synth.paused) {
-        synth.resume()
-      }
-      // Cancel previous queued speech to keep real-time freshness
-      synth.cancel()
-
-      const utterance = new SpeechSynthesisUtterance(text)
-      utterance.lang = 'hi-IN'
-      utterance.rate = options?.rate ?? 0.95 // clear speaking rate for restaurant
-      utterance.pitch = options?.pitch ?? 1.0
-      utterance.volume = options?.volume ?? 1.0
-
-      const { voice } = findBestVoice()
-      if (voice) {
-        utterance.voice = voice
-      }
-
-      utterance.onstart = () => {
-        options?.onStart?.()
-      }
-
-      utterance.onend = () => {
+      options?.onStart?.()
+      window.AndroidTTS.speak(text)
+      // Native speech handles audio output on device speaker directly
+      setTimeout(() => {
         options?.onEnd?.()
-        resolve(true)
-      }
-
-      utterance.onerror = (e) => {
-        // 'interrupted' is common when cancelled, not a critical failure
-        if (e.error !== 'interrupted' && e.error !== 'canceled') {
-          console.warn('[SpeechSynthesis] Announcement error:', e.error)
-          options?.onError?.(e)
-        }
-        resolve(false)
-      }
-
-      // Safety timeout in case speech engine hangs (browser edge cases)
-      const safetyTimer = setTimeout(() => {
-        resolve(false)
-      }, 9000)
-
-      utterance.addEventListener(
-        'end',
-        () => {
-          clearTimeout(safetyTimer)
-        },
-        { once: true }
-      )
-
-      synth.speak(utterance)
+      }, 3000)
+      return true
     } catch (err) {
-      console.warn('[SpeechSynthesis] Failed to speak:', err)
-      options?.onError?.(err)
-      resolve(false)
+      console.warn('[AndroidTTS] Native speak call failed, falling back:', err)
     }
-  })
+  }
+
+  // 2. Standard Browser Web Speech API (Chrome, Safari, Edge)
+  if ('speechSynthesis' in window && 'SpeechSynthesisUtterance' in window) {
+    return new Promise((resolve) => {
+      try {
+        const synth = window.speechSynthesis
+
+        if (synth.paused) {
+          synth.resume()
+        }
+        synth.cancel()
+
+        const utterance = new SpeechSynthesisUtterance(text)
+        utterance.lang = 'hi-IN'
+        utterance.rate = options?.rate ?? 0.95
+        utterance.pitch = options?.pitch ?? 1.0
+        utterance.volume = options?.volume ?? 1.0
+
+        const { voice } = findBestVoice()
+        if (voice) {
+          utterance.voice = voice
+        }
+
+        utterance.onstart = () => {
+          options?.onStart?.()
+        }
+
+        utterance.onend = () => {
+          options?.onEnd?.()
+          resolve(true)
+        }
+
+        utterance.onerror = (e) => {
+          if (e.error !== 'interrupted' && e.error !== 'canceled') {
+            console.warn('[SpeechSynthesis] Announcement error:', e.error)
+            options?.onError?.(e)
+          }
+          resolve(false)
+        }
+
+        const safetyTimer = setTimeout(() => {
+          resolve(false)
+        }, 9000)
+
+        utterance.addEventListener(
+          'end',
+          () => {
+            clearTimeout(safetyTimer)
+          },
+          { once: true }
+        )
+
+        synth.speak(utterance)
+      } catch (err) {
+        console.warn('[SpeechSynthesis] Failed to speak:', err)
+        options?.onError?.(err)
+        resolve(false)
+      }
+    })
+  }
+
+  // 3. Fallback: Online Hindi Audio TTS stream via HTML5 Audio element
+  try {
+    const audioUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=hi&client=tw-ob&q=${encodeURIComponent(text)}`
+    const audio = new Audio(audioUrl)
+    audio.volume = options?.volume ?? 1.0
+    options?.onStart?.()
+    await audio.play()
+    options?.onEnd?.()
+    return true
+  } catch (audioErr) {
+    console.warn('[AudioFallback] Cloud TTS failed:', audioErr)
+    return false
+  }
 }
 
 /**

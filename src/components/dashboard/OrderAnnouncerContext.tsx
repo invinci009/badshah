@@ -100,15 +100,27 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
   const isInitialFetch = useRef<boolean>(true)
   const dismissTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Listen for speech synthesis voices loaded event
+  // Listen for speech synthesis voices and Android native TTS bridge
   useEffect(() => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) return
-    const onVoices = () => {
+    if (typeof window === 'undefined') return
+    const updateEngine = () => {
       setEngineStatus(getVoiceEngineStatus())
     }
-    window.speechSynthesis.addEventListener('voiceschanged', onVoices)
+
+    updateEngine()
+
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.addEventListener('voiceschanged', updateEngine)
+    }
+
+    // Re-check after 500ms to catch Android JavascriptInterface injection
+    const timer = setTimeout(updateEngine, 500)
+
     return () => {
-      window.speechSynthesis.removeEventListener('voiceschanged', onVoices)
+      clearTimeout(timer)
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.removeEventListener('voiceschanged', updateEngine)
+      }
     }
   }, [])
 
