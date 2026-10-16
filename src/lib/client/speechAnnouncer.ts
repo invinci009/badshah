@@ -12,6 +12,12 @@ declare global {
   interface Window {
     AndroidTTS?: {
       speak: (text: string) => void
+      showOrderNotification?: (
+        orderNumber: string,
+        tableLabel: string,
+        itemsSummary: string,
+        speechAnnouncement: string
+      ) => void
       isAvailable: () => boolean
       stop: () => void
     }
@@ -391,57 +397,81 @@ export async function announceOrderInHindi(
 }
 
 /**
- * Display native browser notification for new orders.
+ * Display native Android / browser notification for new orders and dictate items.
  */
 export function showOrderNotification(params: {
   orderNumber: string
   tableLabel?: string | null
   totalFormatted?: string
   items?: Array<SpeechOrderItem | string>
+  speechAnnouncement?: string
   onClick?: () => void
 }): boolean {
-  if (typeof window === 'undefined' || !('Notification' in window)) return false
+  if (typeof window === 'undefined') return false
 
-  if (Notification.permission !== 'granted') return false
-
-  try {
-    const tableText = params.tableLabel ? `टेबल: ${params.tableLabel}` : 'नया ऑर्डर'
-    const title = `🔔 नया ऑर्डर प्राप्त हुआ! (${params.orderNumber})`
-
-    let itemsLine = ''
-    if (params.items && params.items.length > 0) {
-      const itemNames = params.items.slice(0, 3).map((it) => {
-        if (typeof it === 'string') return it
-        const qty = it.quantity || it.qty || 1
-        return `${qty}x ${it.itemName || it.name}`
-      })
-      itemsLine = `\nऑर्डर: ${itemNames.join(', ')}${params.items.length > 3 ? ` +${params.items.length - 3} more` : ''}`
+  let itemsSummary = ''
+  if (params.items && params.items.length > 0) {
+    const itemNames = params.items.slice(0, 5).map((it) => {
+      if (typeof it === 'string') return it
+      const qty = it.quantity || it.qty || 1
+      return `${qty}x ${it.itemName || it.name}`
+    })
+    itemsSummary = itemNames.join(', ')
+    if (params.items.length > 5) {
+      itemsSummary += ` (+${params.items.length - 5} अन्य)`
     }
-
-    const body = `${tableText}${params.totalFormatted ? ` • कुल: ${params.totalFormatted}` : ''}${itemsLine}\nकिचन डैशबोर्ड पर देखें`
-
-    const options: NotificationOptions & { renotify?: boolean } = {
-      body,
-      icon: '/icons/icon-192x192.png',
-      badge: '/icons/favicon-32x32.png',
-      tag: `order-${params.orderNumber}`,
-      renotify: true,
-      requireInteraction: false,
-    }
-
-    const notification = new Notification(title, options as NotificationOptions)
-
-    notification.onclick = () => {
-      window.focus()
-      params.onClick?.()
-      notification.close()
-    }
-
-    return true
-  } catch (err) {
-    console.warn('[Notification] Could not display browser notification:', err)
-    return false
   }
+
+  const table = params.tableLabel ? String(params.tableLabel) : 'काउंटर'
+  const speechText =
+    params.speechAnnouncement ||
+    getHindiTableAnnouncement({ tableLabel: params.tableLabel, items: params.items })
+
+  // 1. Native Android App: Trigger native Android Heads-Up notification + item dictation
+  if (window.AndroidTTS && typeof window.AndroidTTS.showOrderNotification === 'function') {
+    try {
+      window.AndroidTTS.showOrderNotification(
+        params.orderNumber,
+        table,
+        itemsSummary,
+        speechText
+      )
+      return true
+    } catch (e) {
+      console.warn('[AndroidTTS] showOrderNotification error:', e)
+    }
+  }
+
+  // 2. Standard Browser Web Notification API (Desktop / Chrome)
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      const title = `🔔 नया ऑर्डर: टेबल ${table} (#${params.orderNumber})`
+      const body = `🍽️ टेबल: ${table}${params.totalFormatted ? ` • ${params.totalFormatted}` : ''}${itemsSummary ? `\n📋 ${itemsSummary}` : ''}\nकिचन डैशबोर्ड पर देखें`
+
+      const options: NotificationOptions & { renotify?: boolean } = {
+        body,
+        icon: '/icons/icon-192x192.png',
+        badge: '/icons/favicon-32x32.png',
+        tag: `order-${params.orderNumber}`,
+        renotify: true,
+        requireInteraction: false,
+      }
+
+      const notification = new Notification(title, options as NotificationOptions)
+      notification.onclick = () => {
+        window.focus()
+        params.onClick?.()
+        notification.close()
+      }
+
+      return true
+    } catch (err) {
+      console.warn('[Notification] Could not display browser notification:', err)
+      return false
+    }
+  }
+
+  return false
 }
 
 /**

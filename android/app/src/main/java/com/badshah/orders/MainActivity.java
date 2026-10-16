@@ -54,28 +54,32 @@ public class MainActivity extends BridgeActivity {
             settings.setMediaPlaybackRequiresUserGesture(false);
             settings.setDomStorageEnabled(true);
 
-            // Expose native Android TTS to JavaScript (window.AndroidTTS)
+            // Expose native Android TTS & Order Notifications to JavaScript (window.AndroidTTS)
             this.bridge.getWebView().addJavascriptInterface(new Object() {
                 @JavascriptInterface
                 public void speak(String text) {
-                    if (text == null || text.trim().isEmpty()) return;
-                    if (ttsReady && tts != null) {
-                        speakNative(text);
-                    } else {
-                        pendingSpeech = text;
-                    }
+                    OrderBackgroundService.speakAloud(text);
+                }
+
+                @JavascriptInterface
+                public void showOrderNotification(String orderNumber, String tableLabel, String itemsSummary, String speechAnnouncement) {
+                    OrderBackgroundService.postOrderAlert(
+                        MainActivity.this,
+                        orderNumber,
+                        tableLabel,
+                        itemsSummary,
+                        speechAnnouncement
+                    );
                 }
 
                 @JavascriptInterface
                 public boolean isAvailable() {
-                    return tts != null && ttsReady;
+                    return OrderBackgroundService.isTtsReady();
                 }
 
                 @JavascriptInterface
                 public void stop() {
-                    if (tts != null) {
-                        tts.stop();
-                    }
+                    OrderBackgroundService.stopSpeech();
                 }
             }, "AndroidTTS");
         }

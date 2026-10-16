@@ -18,6 +18,7 @@ import {
   type VoiceEngineStatus,
 } from '@/lib/client/speechAnnouncer'
 import { formatPaise } from '@/lib/ordering/rules.mjs'
+import { getHindiTableAnnouncement } from '@/lib/ordering/hindiAnnouncement.mjs'
 
 export interface IncomingOrderInfo {
   id: string
@@ -161,12 +162,18 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
         setActiveArrival(null)
       }, 7000)
 
-      // 1. Browser Notification (independent of sound mute state)
+      const speechText = getHindiTableAnnouncement({
+        tableLabel: order.tableLabel,
+        items: order.items,
+      })
+
+      // 1. Android / Browser Notification with Item Dictation
       showOrderNotification({
         orderNumber: order.orderNumber,
         tableLabel: order.tableLabel,
         totalFormatted: order.totalPaise !== undefined ? formatPaise(order.totalPaise) : undefined,
         items: order.items,
+        speechAnnouncement: speechText,
         onClick: () => {
           if (typeof window !== 'undefined') {
             window.location.hash = 'orders'
@@ -174,8 +181,8 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
         },
       })
 
-      // 2. Hindi Audio Voice Announcement (if voice alert enabled)
-      if (!isVoiceEnabled) return
+      // 2. Hindi Audio Voice Announcement for web browsers (AndroidTTS dictates via notification)
+      if (!isVoiceEnabled || (typeof window !== 'undefined' && window.AndroidTTS)) return
 
       setIsAnnouncing(true)
       try {
@@ -207,6 +214,23 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
       unlockAudio()
       setIsAnnouncing(true)
       setLastAnnouncement(`टेबल नंबर ${tableLabel}`)
+
+      const testOrderNum = String(Math.floor(100 + Math.random() * 900))
+      const speechText = getHindiTableAnnouncement({ tableLabel, items })
+
+      // Trigger notification and dictate items aloud
+      showOrderNotification({
+        orderNumber: testOrderNum,
+        tableLabel,
+        items,
+        speechAnnouncement: speechText,
+      })
+
+      if (typeof window !== 'undefined' && window.AndroidTTS) {
+        setTimeout(() => setIsAnnouncing(false), 3000)
+        return
+      }
+
       try {
         await announceOrderInHindi({
           tableLabel,
