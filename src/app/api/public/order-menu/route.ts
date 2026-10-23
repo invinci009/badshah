@@ -27,6 +27,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Ordering is not available for this link' }, { status: 404 })
     }
 
+    const [categories, items, ordering, settings, diningTables] = await Promise.all([
+      getOrderMenuCategories().catch(() => []),
+      getOrderMenuItems().catch(() => []),
+      getOrderingConfig().catch(() => ({ taxRateBps: 500, serviceChargePaise: 0, currency: 'INR' as const, generalOrderingEnabled: true, updatedAt: '' })),
+      getRestaurantSettings().catch(() => null),
+      getTables(true).catch(() => []),
+    ])
+
     const tableParam = searchParams.get('table')
     let table: { id: string; label: string; state?: string } | null = null
     if (token) {
@@ -37,8 +45,7 @@ export async function GET(request: NextRequest) {
       }
     }
     if (!table && tableParam) {
-      const allTables = await getTables(true).catch(() => [])
-      const matched = allTables.find((t) => normalizeTableLabel(t.label) === normalizeTableLabel(tableParam))
+      const matched = diningTables.find((t) => normalizeTableLabel(t.label) === normalizeTableLabel(tableParam))
       if (matched) {
         if (!matched.active) {
           return NextResponse.json({ error: `Table "${matched.label}" is currently inactive.` }, { status: 403 })
@@ -49,25 +56,30 @@ export async function GET(request: NextRequest) {
       }
     }
     if (!table && !token) {
-      const ordering = await getOrderingConfig().catch(() => null)
       if (ordering && !ordering.generalOrderingEnabled) {
         return NextResponse.json({ error: 'Please scan your table QR to order' }, { status: 403 })
       }
     }
 
-    const [categories, items, ordering, settings, diningTables] = await Promise.all([
-      getOrderMenuCategories().catch(() => []),
-      getOrderMenuItems().catch(() => []),
-      getOrderingConfig().catch(() => ({ taxRateBps: 500, serviceChargePaise: 0, currency: 'INR' as const })),
-      getRestaurantSettings().catch(() => null),
-      getTables(true).catch(() => []),
-    ])
+    const etag = `W/"menu-${categories.length}-${items.length}-${settings?.updatedAt || '0'}"`
+    if (request.headers.get('if-none-match') === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
+        },
+      })
+    }
 
     return NextResponse.json(
       {
         restaurantName: settings?.name || config.name,
         logoUrl: settings?.branding?.logoUrl || config.branding.logoUrl || null,
         contactPhone: settings?.contact?.phone || config.contact.phone || null,
+        googleReviewUrl:
+          campaign.googleReviewUrlOverride || settings?.google?.reviewUrl || config.google?.reviewUrl || null,
+        reviewSlug: campaign.slug,
         table,
         tables: diningTables.filter((t) => t.active).map((t) => ({
           id: t.id,
@@ -97,7 +109,8 @@ export async function GET(request: NextRequest) {
       {
         status: 200,
         headers: {
-          'Cache-Control': 'public, s-maxage=15, stale-while-revalidate=30',
+          ETag: etag,
+          'Cache-Control': 'public, s-maxage=30, stale-while-revalidate=60',
         },
       }
     )

@@ -90,30 +90,58 @@ function checkMemoryLimit(
 }
 
 export async function rateLimitMiddleware(request: NextRequest): Promise<NextResponse | null> {
+  // 1. In local development or testing, never throttle developer activity
+  if (process.env.NODE_ENV === 'development') {
+    return null
+  }
+
   const { pathname } = request.nextUrl
   const method = request.method
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? 'unknown-client'
+  const ip =
+    request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    request.headers.get('x-real-ip') ||
+    'client'
 
-  // Determine rate limits based on action type to protect Firestore writes and reads
-  let maxRequests = 60
+  // Determine rate limits and isolated bucket key based on action type
+  // Public catalog reads have high capacity to support 400+ guests sharing the restaurant Wi-Fi IP
+  let maxRequests = 120
+  let category = 'general'
   const windowMs = 60_000 // 1 minute
 
   if (pathname.includes('/orders') && method === 'POST') {
-    // Order creation: limit to 15 per minute per IP to prevent spam submissions
-    maxRequests = 15
+    // Order creation: limit to 25 per minute per IP to prevent spam submissions
+    maxRequests = 25
+    category = 'order-create'
   } else if (pathname.includes('/service-requests') && method === 'POST') {
-    // Waiter service requests: limit to 10 per minute per IP
-    maxRequests = 10
+    // Waiter service requests: limit to 15 per minute per IP
+    maxRequests = 15
+    category = 'service-create'
+  } else if (pathname.includes('/loyalty/auth') || pathname.includes('/loyalty/claim')) {
+    // Loyalty auth/claim attempts: limit to 30 per minute
+    maxRequests = 30
+    category = 'loyalty-auth'
   } else if (pathname.startsWith('/api/business/')) {
-    // Business dashboard routes: max 120 per minute
-    maxRequests = 120
+    // Business dashboard routes: max 300 per minute
+    maxRequests = 300
+    category = 'business'
+  } else if (pathname === '/api/public/order-menu' || pathname.startsWith('/api/public/order-menu')) {
+    // Public menu & catalog reads: High capacity (1200 per minute per IP)
+    // Critical: Supports 400+ concurrent diners sharing the restaurant's guest Wi-Fi NAT IP
+    maxRequests = 1200
+    category = 'menu-catalog'
+  } else if (pathname.startsWith('/api/public/orders/') && method === 'GET') {
+    // Order tracking & SSE stream: 300 per minute per IP
+    maxRequests = 300
+    category = 'order-track'
   } else if (pathname.startsWith('/api/public/')) {
-    // Public queries & catalog reads: max 60 per minute per IP
-    maxRequests = 60
+    // General public queries (tables, settings): 300 per minute per IP
+    maxRequests = 300
+    category = 'public-general'
   }
 
-  const limiter = getUpstashLimiter()
+  const memoryKey = `${ip}:${category}`
 
+  const limiter = getUpstashLimiter()
   if (limiter) {
     try {
       const timeoutPromise = new Promise<{ success: boolean; remaining: number; reset: number }>((_, reject) =>
@@ -121,7 +149,7 @@ export async function rateLimitMiddleware(request: NextRequest): Promise<NextRes
       )
 
       const result = await Promise.race([
-        limiter.limit(`${ip}:${pathname}`),
+        limiter.limit(memoryKey),
         timeoutPromise,
       ])
 
@@ -145,7 +173,6 @@ export async function rateLimitMiddleware(request: NextRequest): Promise<NextRes
   }
 
   // Use In-Memory sliding window
-  const memoryKey = `${ip}:${pathname.startsWith('/api/public/orders') ? 'order' : 'general'}`
   const { success, remaining, reset } = checkMemoryLimit(memoryKey, maxRequests, windowMs)
 
   if (!success) {

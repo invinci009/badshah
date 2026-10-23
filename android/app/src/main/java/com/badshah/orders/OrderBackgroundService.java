@@ -36,6 +36,7 @@ public class OrderBackgroundService extends Service {
     private PowerManager.WakeLock wakeLock;
     private volatile boolean isRunning = false;
     private boolean isFirstPoll = true;
+    private String lastEtag = null;
 
     @Override
     public void onCreate() {
@@ -247,8 +248,22 @@ public class OrderBackgroundService extends Service {
             conn.setConnectTimeout(6000);
             conn.setReadTimeout(6000);
             conn.setRequestProperty("Cache-Control", "no-cache");
+            if (lastEtag != null) {
+                conn.setRequestProperty("If-None-Match", lastEtag);
+            }
 
-            if (conn.getResponseCode() == 200) {
+            int responseCode = conn.getResponseCode();
+            if (responseCode == 304) {
+                // Zero changes on server — skip download and JSON parsing
+                conn.disconnect();
+                return;
+            }
+
+            if (responseCode == 200) {
+                String newEtag = conn.getHeaderField("ETag");
+                if (newEtag != null) {
+                    lastEtag = newEtag;
+                }
                 BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
                 StringBuilder sb = new StringBuilder();
                 String line;

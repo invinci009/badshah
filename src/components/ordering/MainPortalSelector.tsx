@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   Sparkles,
   ChevronDown,
+  Crown,
 } from 'lucide-react'
 import { formatTableDisplay } from '@/lib/ordering/rules.mjs'
 import { getActiveOrderSession, type ActiveSession } from '@/lib/ordering/cart'
@@ -256,8 +257,8 @@ export default function MainPortalSelector({
         </div>
       )}
 
-      {/* Core Action: Option 1 (Order through Table) */}
-      <div className="space-y-3.5 pt-1 text-left">
+      {/* Core Action: All-in-One Order Portal with Integrated Rewards */}
+      <div className="space-y-3 pt-1 text-left">
         <Link
           href={menuHref}
           className="group relative block p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-amber-600 via-amber-500 to-yellow-600 hover:from-amber-700 hover:to-amber-600 text-white shadow-xl shadow-amber-600/25 border border-amber-400/40 hover:shadow-2xl hover:shadow-amber-600/35 transition-all duration-200 active:scale-[0.98]"
@@ -267,61 +268,54 @@ export default function MainPortalSelector({
               <UtensilsCrossed className="w-6 h-6 sm:w-7 sm:h-7 text-white" />
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-1">
+              <div className="flex items-center justify-between gap-1 flex-wrap">
                 <span className="text-[10px] font-black uppercase tracking-wider text-amber-100 bg-black/15 px-2 py-0.5 rounded-full inline-block">
                   {effectiveTable ? `${formatTableDisplay(effectiveTable)} • Dine-in` : 'Dine-in Order'}
                 </span>
-                <span className="text-[10px] font-bold text-amber-200 bg-white/15 px-2 py-0.5 rounded-full">
-                  Digital Menu
+                <span className="text-[10px] font-black text-amber-950 bg-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                  <Crown className="w-3 h-3 text-amber-800 fill-amber-700" />
+                  VIP Rewards Integrated
                 </span>
               </div>
               <h2 className="text-base sm:text-lg font-black text-white mt-1 leading-tight flex items-center gap-1.5">
-                {effectiveTable ? `Order for ${formatTableDisplay(effectiveTable)}` : 'Order through a Table'}
+                {effectiveTable ? `Order for ${formatTableDisplay(effectiveTable)}` : 'Start Your Order'}
               </h2>
               <p className="text-xs text-amber-50 mt-1 leading-relaxed">
                 {effectiveTable
-                  ? `Browse live menu, customize dishes & order for ${formatTableDisplay(effectiveTable)}. Food will be served to your table.`
-                  : 'Browse live menu with photos & order fresh food served right to your dining table.'}
+                  ? `Browse live menu, customize dishes, earn loyalty points & redeem member rewards directly for ${formatTableDisplay(effectiveTable)}.`
+                  : 'Browse live menu with photos, earn loyalty points & redeem member rewards delivered right to your table.'}
               </p>
-              <div className="mt-2.5 flex items-center gap-1.5 text-xs font-bold text-white bg-black/20 hover:bg-black/30 w-fit px-3 py-1 rounded-xl transition-colors">
-                <span>{effectiveTable ? `Open ${formatTableDisplay(effectiveTable)} Menu` : 'Open Digital Menu'}</span>
+              <div className="mt-2.5 flex items-center gap-1.5 text-xs font-bold text-white bg-black/20 hover:bg-black/30 w-fit px-3.5 py-1.5 rounded-xl transition-colors shadow-xs">
+                <span>{effectiveTable ? `Open ${formatTableDisplay(effectiveTable)} Menu & Rewards` : 'Open Menu & Order'}</span>
                 <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
               </div>
             </div>
           </div>
         </Link>
 
-        {/* Option 2: Rate Us & Review */}
+        {/* Secondary: Guest Review & Ratings */}
         <Link
           href={reviewHref}
-          className="group relative block p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-white via-amber-50/40 to-stone-50 hover:bg-amber-50/70 border-2 border-amber-200/90 hover:border-amber-400 text-stone-900 shadow-md hover:shadow-xl hover:shadow-amber-500/10 transition-all duration-200 active:scale-[0.98]"
+          className="group relative block p-3.5 sm:p-4 rounded-2xl bg-white/90 hover:bg-white border border-amber-200/90 hover:border-amber-300 text-stone-900 shadow-xs hover:shadow-md transition-all duration-200 active:scale-[0.98]"
         >
-          <div className="flex items-start gap-3.5 sm:gap-4">
-            <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-gradient-to-tr from-amber-500/15 to-yellow-500/15 border border-amber-300/50 flex items-center justify-center shrink-0 text-amber-600 group-hover:scale-105 transition-transform shadow-xs">
-              <Star className="w-6 h-6 sm:w-7 sm:h-7 fill-amber-500 text-amber-500" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center justify-between gap-1">
-                <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-full inline-block">
-                  Guest Review &amp; Ratings
-                </span>
-                <div className="flex items-center gap-0.5 text-amber-500">
-                  {[...Array(5)].map((_, i) => (
-                    <Star key={i} className="w-3 h-3 fill-amber-400 text-amber-400" />
-                  ))}
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-300/40 flex items-center justify-center shrink-0 text-amber-600">
+                <Star className="w-5 h-5 fill-amber-400 text-amber-400" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-stone-900">Already Dined? Leave a Review</span>
+                  <div className="hidden sm:flex items-center gap-0.5 text-amber-400">
+                    {[...Array(5)].map((_, i) => (
+                      <Star key={i} className="w-2.5 h-2.5 fill-amber-400" />
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <h2 className="text-base sm:text-lg font-black text-stone-900 mt-1 leading-tight">
-                Review Restaurant &amp; Rate Us
-              </h2>
-              <p className="text-xs text-stone-600 mt-1 leading-relaxed">
-                Enjoying your dining experience? Share your feedback in 30 seconds &amp; get an instant Google review draft!
-              </p>
-              <div className="mt-2.5 flex items-center gap-1.5 text-xs font-bold text-amber-900 bg-amber-100/80 group-hover:bg-amber-200/90 w-fit px-3 py-1 rounded-xl transition-colors">
-                <span>Leave a Review</span>
-                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                <p className="text-[11px] text-stone-500 truncate">Rate your experience in 30 seconds &amp; get a Google review draft</p>
               </div>
             </div>
+            <ArrowRight className="w-4 h-4 text-stone-400 group-hover:translate-x-0.5 group-hover:text-amber-600 transition-all shrink-0" />
           </div>
         </Link>
       </div>

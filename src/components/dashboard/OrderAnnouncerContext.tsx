@@ -23,14 +23,22 @@ import { getHindiTableAnnouncement } from '@/lib/ordering/hindiAnnouncement.mjs'
 export interface IncomingOrderInfo {
   id: string
   orderNumber: string
+  tableId?: string | null
   tableLabel?: string | null
+  customerName?: string
+  customerPhone?: string
+  notes?: string
   totalPaise?: number
+  paidPaise?: number
+  refundedPaise?: number
+  paymentStatus?: string
   fulfilment: string
   createdAt?: string
   items?: Array<{
     itemId?: string
     itemName: string
     quantity: number
+    options?: Array<{ optionName: string }>
   }>
   itemCount?: number
 }
@@ -89,7 +97,6 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
 
   const [activeOrders, setActiveOrders] = useState<IncomingOrderInfo[]>([])
   const [isSyncing, setIsSyncing] = useState<boolean>(false)
-  const etagRef = useRef<string | null>(null)
 
   const [engineStatus, setEngineStatus] = useState<VoiceEngineStatus>(() => getVoiceEngineStatus())
   const [isAnnouncing, setIsAnnouncing] = useState(false)
@@ -100,6 +107,7 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
   const announcedOrderIds = useRef<Set<string>>(new Set())
   const isInitialFetch = useRef<boolean>(true)
   const dismissTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const etagRef = useRef<string | null>(null)
 
   // Listen for speech synthesis voices and Android native TTS bridge
   useEffect(() => {
@@ -247,16 +255,21 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
     []
   )
 
-  // Real-time Background Order Poller with ETag 304 (runs in foreground & background)
-  const pollActiveOrders = useCallback(async (bypassEtag = false) => {
+  // Real-time Background Order Poller (pauses when dashboard tab is hidden/minimized)
+  const pollActiveOrders = useCallback(async (force = false) => {
+    if (!force && typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+      return
+    }
     try {
       setIsSyncing(true)
       const headers: Record<string, string> = { 'Cache-Control': 'no-cache' }
-      if (etagRef.current && !bypassEtag) {
+      if (etagRef.current) {
         headers['If-None-Match'] = etagRef.current
       }
 
-      const res = await fetch('/api/business/orders?status=active&limit=30', { headers })
+      const res = await fetch(`/api/business/orders?status=active&limit=30`, {
+        headers,
+      })
 
       // 304 Not Modified: zero changes, zero memory churn, instant exit!
       if (res.status === 304) {
@@ -321,30 +334,30 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
   }, [announceOrderDirectly])
 
   const refreshActiveOrders = useCallback(async () => {
-    await pollActiveOrders(true)
+    await pollActiveOrders()
   }, [pollActiveOrders])
 
   useEffect(() => {
     pollActiveOrders(true)
 
-    // Poll every 10 seconds for real-time order arrival (foreground & background)
+    // Poll every 6 seconds while dashboard tab is active and visible
     const interval = setInterval(() => {
       pollActiveOrders()
-    }, 10000)
+    }, 6000)
 
-    // Immediate sync when tab gains visibility or window focus
+    // Immediate sync when tab gains visibility, window focus, or network reconnects
     const onVisible = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        pollActiveOrders()
-      }
+      pollActiveOrders(true)
     }
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onVisible)
+    window.addEventListener('online', onVisible)
 
     return () => {
       clearInterval(interval)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
+      window.removeEventListener('online', onVisible)
     }
   }, [pollActiveOrders])
 

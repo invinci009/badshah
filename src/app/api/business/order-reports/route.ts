@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getOrders, getRecentPaymentEntries } from '@/lib/firebase/ordering'
 import { getSessionFromRequest } from '@/lib/firebase/auth'
+import { getCached } from '@/lib/cache'
 
-// GET /api/business/order-reports — server-side ordering analytics.
+// GET /api/business/order-reports â€” server-side ordering analytics.
 // Definitions:
 // - grossValuePaise: sum of totals of NON-cancelled orders (completed sales only).
 // - collectionsPaise: sum of recorded collection entries.
@@ -14,52 +15,53 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const { searchParams } = new URL(request.url)
-    const limit = Math.min(5000, Math.max(100, parseInt(searchParams.get('limit') || '2000', 10) || 2000))
-    const [orders, payments] = await Promise.all([getOrders(limit), getRecentPaymentEntries(limit)])
+    const limit = Math.min(500, Math.max(50, parseInt(searchParams.get('limit') || '300', 10) || 300))
 
-    const dayStart = new Date()
-    dayStart.setHours(0, 0, 0, 0)
-    const todayIso = dayStart.toISOString()
+    const report = await getCached(`order:reports:${limit}`, 3 * 60 * 1000, async () => {
+      const [orders, payments] = await Promise.all([getOrders(limit), getRecentPaymentEntries(limit)])
 
-    const active = orders.filter((o) => ['RECEIVED', 'ACCEPTED', 'PREPARING', 'READY'].includes(o.fulfilment))
-    const completed = orders.filter((o) => o.fulfilment === 'SERVED')
-    const cancelled = orders.filter((o) => o.fulfilment === 'CANCELLED')
-    const valid = orders.filter((o) => o.fulfilment !== 'CANCELLED')
-    const today = orders.filter((o) => o.createdAt >= todayIso)
+      const dayStart = new Date()
+      dayStart.setHours(0, 0, 0, 0)
+      const todayIso = dayStart.toISOString()
 
-    const grossValuePaise = valid.reduce((s, o) => s + o.totalPaise, 0)
-    const totalPaidValid = valid.reduce((s, o) => s + o.paidPaise, 0)
-    const collectionsPaise = payments.filter((p) => p.kind === 'collection').reduce((s, p) => s + p.amountPaise, 0)
-    const refundsPaise = payments.filter((p) => p.kind === 'refund').reduce((s, p) => s + p.amountPaise, 0)
+      const active = orders.filter((o) => ['RECEIVED', 'ACCEPTED', 'PREPARING', 'READY'].includes(o.fulfilment))
+      const completed = orders.filter((o) => o.fulfilment === 'SERVED')
+      const cancelled = orders.filter((o) => o.fulfilment === 'CANCELLED')
+      const valid = orders.filter((o) => o.fulfilment !== 'CANCELLED')
+      const today = orders.filter((o) => o.createdAt >= todayIso)
 
-    const itemQty = new Map<string, { name: string; qty: number; revenue: number }>()
-    for (const o of valid) {
-      for (const it of o.items) {
-        const cur = itemQty.get(it.itemId) || { name: it.itemName, qty: 0, revenue: 0 }
-        cur.qty += it.quantity
-        cur.revenue += it.lineTotalPaise
-        itemQty.set(it.itemId, cur)
+      const grossValuePaise = valid.reduce((s, o) => s + o.totalPaise, 0)
+      const totalPaidValid = valid.reduce((s, o) => s + o.paidPaise, 0)
+      const collectionsPaise = payments.filter((p) => p.kind === 'collection').reduce((s, p) => s + p.amountPaise, 0)
+      const refundsPaise = payments.filter((p) => p.kind === 'refund').reduce((s, p) => s + p.amountPaise, 0)
+
+      const itemQty = new Map<string, { name: string; qty: number; revenue: number }>()
+      for (const o of valid) {
+        for (const it of o.items) {
+          const cur = itemQty.get(it.itemId) || { name: it.itemName, qty: 0, revenue: 0 }
+          cur.qty += it.quantity
+          cur.revenue += it.lineTotalPaise
+          itemQty.set(it.itemId, cur)
+        }
       }
-    }
-    const bestSellers = [...itemQty.values()].sort((a, b) => b.qty - a.qty).slice(0, 8)
+      const bestSellers = [...itemQty.values()].sort((a, b) => b.qty - a.qty).slice(0, 8)
 
-    const byHour = new Array(24).fill(0) as number[]
-    for (const o of valid) {
-      const h = new Date(o.createdAt).getHours()
-      if (h >= 0 && h < 24) byHour[h] += 1
-    }
+      const byHour = new Array(24).fill(0) as number[]
+      for (const o of valid) {
+        const h = new Date(o.createdAt).getHours()
+        if (h >= 0 && h < 24) byHour[h] += 1
+      }
 
-    const byTable = new Map<string, { label: string; count: number; revenue: number }>()
-    for (const o of valid) {
-      const key = o.tableId || 'counter'
-      const cur = byTable.get(key) || { label: o.tableLabel || 'Counter', count: 0, revenue: 0 }
-      cur.count += 1
-      cur.revenue += o.totalPaise
-      byTable.set(key, cur)
-    }
+      const byTable = new Map<string, { label: string; count: number; revenue: number }>()
+      for (const o of valid) {
+        const key = o.tableId || 'counter'
+        const cur = byTable.get(key) || { label: o.tableLabel || 'Counter', count: 0, revenue: 0 }
+        cur.count += 1
+        cur.revenue += o.totalPaise
+        byTable.set(key, cur)
+      }
 
-    return NextResponse.json(
-      {
+      return {
         ordersToday: today.length,
         activeCount: active.length,
         newCount: orders.filter((o) => o.fulfilment === 'RECEIVED').length,
@@ -75,9 +77,27 @@ export async function GET(request: NextRequest) {
         bestSellers,
         byHour,
         byTable: [...byTable.values()].sort((a, b) => b.revenue - a.revenue),
+      }
+    })
+
+    const etag = `W/"rep-${limit}-${report.totalCount}-${report.ordersToday}-${report.grossValuePaise}-${report.collectionsPaise}"`
+    if (request.headers.get('if-none-match') === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          'Cache-Control': 'private, max-age=60',
+        },
+      })
+    }
+
+    return NextResponse.json(report, {
+      status: 200,
+      headers: {
+        ETag: etag,
+        'Cache-Control': 'private, max-age=60',
       },
-      { status: 200 }
-    )
+    })
   } catch (error) {
     console.error('Order reports error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

@@ -3,6 +3,7 @@ import type { Firestore } from 'firebase-admin/firestore'
 import { getAdminFirestore } from './admin'
 import { getCached, invalidateCache } from '../cache'
 import { sendMobileOrderAlarm } from '../server/pushNotifier'
+import { emitOrderStatusChange } from '../server/orderEvents'
 
 // ==============================================================================
 // Ordering persistence (Firestore, Admin SDK, server-only).
@@ -58,7 +59,7 @@ export interface TableQrToken {
 }
 
 export async function getTables(includeInactive = true): Promise<DiningTable[]> {
-  const tables = await getCached('tables:all', 10 * 60 * 1000, async () => {
+  const tables = await getCached('tables:all', 60 * 60 * 1000, async () => {
     const q = getDb().collection('diningTables').orderBy('label', 'asc')
     const snapshot = await q.get()
     return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as DiningTable)
@@ -67,6 +68,10 @@ export async function getTables(includeInactive = true): Promise<DiningTable[]> 
 }
 
 export async function getTable(id: string): Promise<DiningTable | null> {
+  // Fast path: check cached tables list first to eliminate redundant reads (0 reads)
+  const tables = await getTables(true).catch(() => [])
+  const found = tables.find((t) => t.id === id)
+  if (found) return found
   const snap = await getDb().doc(`diningTables/${id}`).get()
   if (!snap.exists) return null
   return { id: snap.id, ...snap.data() } as DiningTable
@@ -189,6 +194,7 @@ export async function issueTableToken(
   const batch = db.batch()
   if (prev) {
     batch.update(db.doc(`tableQrTokens/${prev}`), { revokedAt: serverNow() })
+    invalidateCache(`tableToken:${prev}`)
   }
   batch.set(db.doc(`tableQrTokens/${tokenHash}`), {
     tableId,
@@ -214,15 +220,20 @@ export async function revokeTableToken(tableId: string): Promise<void> {
   if (!tableSnap.exists) throw new Error('Table not found')
   const prev = (tableSnap.data() as DiningTable).activeTokenHash
   const batch = db.batch()
-  if (prev) batch.update(db.doc(`tableQrTokens/${prev}`), { revokedAt: serverNow() })
+  if (prev) {
+    batch.update(db.doc(`tableQrTokens/${prev}`), { revokedAt: serverNow() })
+    invalidateCache(`tableToken:${prev}`)
+  }
   batch.update(tableRef, { activeTokenHash: null, activeTokenPrefix: null, updatedAt: serverNow() })
   await batch.commit()
 }
 
 export async function getTableTokenByHash(tokenHash: string): Promise<TableQrToken | null> {
-  const snap = await getDb().doc(`tableQrTokens/${tokenHash}`).get()
-  if (!snap.exists) return null
-  return { tokenHash: snap.id, ...snap.data() } as TableQrToken
+  return getCached(`tableToken:${tokenHash}`, 5 * 60 * 1000, async () => {
+    const snap = await getDb().doc(`tableQrTokens/${tokenHash}`).get()
+    if (!snap.exists) return null
+    return { tokenHash: snap.id, ...snap.data() } as TableQrToken
+  })
 }
 
 /** Resolve a presented token to its table. Returns null for invalid/revoked/inactive. */
@@ -250,7 +261,7 @@ export interface OrderingConfig {
 }
 
 export async function getOrderingConfig(): Promise<OrderingConfig> {
-  return getCached('order:config', 30 * 60 * 1000, async () => {
+  return getCached('order:config', 60 * 60 * 1000, async () => {
     const snap = await getDb().doc('restaurant/ordering').get()
     if (!snap.exists) {
       return {
@@ -333,7 +344,7 @@ export interface OrderMenuItem {
 }
 
 export async function getOrderMenuCategories(): Promise<OrderMenuCategory[]> {
-  return getCached('order:categories', 30 * 60 * 1000, async () => {
+  return getCached('order:categories', 60 * 60 * 1000, async () => {
     const snap = await getDb().collection('orderMenuCategories').orderBy('position', 'asc').get()
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderMenuCategory)
   })
@@ -371,13 +382,17 @@ export async function upsertOrderMenuCategory(data: {
 }
 
 export async function getOrderMenuItems(): Promise<OrderMenuItem[]> {
-  return getCached('order:menu_items', 30 * 60 * 1000, async () => {
+  return getCached('order:menu_items', 60 * 60 * 1000, async () => {
     const snap = await getDb().collection('orderMenuItems').orderBy('position', 'asc').get()
     return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderMenuItem)
   })
 }
 
 export async function getOrderMenuItem(id: string): Promise<OrderMenuItem | null> {
+  // Fast path: check cached menu items catalog first (0 reads)
+  const items = await getOrderMenuItems().catch(() => [])
+  const found = items.find((i) => i.id === id)
+  if (found) return found
   const snap = await getDb().doc(`orderMenuItems/${id}`).get()
   if (!snap.exists) return null
   return { id: snap.id, ...snap.data() } as OrderMenuItem
@@ -512,6 +527,17 @@ export interface Order {
   accessTokenHash: string
   /** Denormalized item IDs for reference-protection queries. */
   itemIds: string[]
+  /** Loyalty: order may carry a checkout reward redemption. */
+  loyalty?: {
+    redemptionId: string | null
+    rewardId: string | null
+    rewardName: string | null
+    discountPaise: number
+    pointsUsed: number
+  } | null
+  /** Loyalty earn flags (set exactly once when the order completes). */
+  loyaltyAwarded?: boolean
+  loyaltyPointsEarned?: number
   createdAt: string
   updatedAt: string
 }
@@ -524,49 +550,153 @@ export async function getOrderByIdempotencyKey(key: string): Promise<Order | nul
 }
 
 export async function getOrder(id: string): Promise<Order | null> {
-  const snap = await getDb().doc(`orders/${id}`).get()
-  if (!snap.exists) return null
-  return { id: snap.id, ...snap.data() } as Order
+  const now = Date.now()
+  // Fast path 1: check in-memory active orders cache ONLY IF fresh (< 4s)
+  if (activeOrdersCache.fetchedAt > 0 && now - activeOrdersCache.fetchedAt < 4000) {
+    const inMemory = activeOrdersCache.orders.find((o) => o.id === id)
+    if (inMemory) return inMemory
+  }
+
+  // Fast path 2: cached order read with request coalescing (3s TTL)
+  return getCached(`order:${id}`, 3000, async () => {
+    const snap = await getDb().doc(`orders/${id}`).get()
+    if (!snap.exists) return null
+    return { id: snap.id, ...snap.data() } as Order
+  })
+}
+
+// ==============================================================================
+// Active Orders In-Memory Cache with Request Coalescing
+// Eliminates repetitive Firestore queries from high-frequency dashboard polling.
+// Serves concurrent polls from memory with 0 Firestore reads.
+// Automatically invalidated immediately on any order creation or status change.
+// ==============================================================================
+interface ActiveOrdersCacheState {
+  orders: Order[]
+  fetchedAt: number
+  inFlight: Promise<Order[]> | null
+  etag: string
+}
+
+declare global {
+  var __rp_activeOrdersCache: ActiveOrdersCacheState | undefined
+}
+
+const activeOrdersCache: ActiveOrdersCacheState = (globalThis.__rp_activeOrdersCache ??= {
+  orders: [],
+  fetchedAt: 0,
+  inFlight: null,
+  etag: '',
+})
+
+export function computeOrdersEtag(list: Order[]): string {
+  if (!list || list.length === 0) return 'W/"ao-empty"'
+  let sig = `${list.length}`
+  for (let i = 0; i < list.length; i++) {
+    const o = list[i]
+    sig += `|${o.id}:${o.fulfilment}:${o.paymentStatus}:${o.updatedAt || o.createdAt || ''}`
+  }
+  let hash = 5381
+  for (let i = 0; i < sig.length; i++) {
+    hash = (hash * 33) ^ sig.charCodeAt(i)
+  }
+  return `W/"ao-${(hash >>> 0).toString(36)}-${list.length}"`
+}
+
+export function invalidateActiveOrdersCache(): void {
+  activeOrdersCache.fetchedAt = 0
+  activeOrdersCache.inFlight = null
+  activeOrdersCache.etag = `W/"ao-${Date.now()}"`
+  invalidateCache('orders:')
+  invalidateCache('order:')
+}
+
+export function getActiveOrdersEtag(): string {
+  return activeOrdersCache.etag || computeOrdersEtag(activeOrdersCache.orders)
 }
 
 export async function getOrders(limit = 100): Promise<Order[]> {
-  const canonical = await getCached('orders:all:canonical', 6000, async () => {
-    const snap = await getDb().collection('orders').orderBy('createdAt', 'desc').limit(100).get()
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
-  })
-  return canonical.slice(0, limit)
+  const snap = await getDb().collection('orders').orderBy('createdAt', 'desc').limit(limit).get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
 }
 
-/** Query only currently active kitchen/service orders to avoid full collection scans. */
-export async function getActiveOrders(limit = 50): Promise<Order[]> {
-  const canonical = await getCached('orders:active:canonical', 6000, async () => {
-    const snap = await getDb()
-      .collection('orders')
-      .where('fulfilment', 'in', ['RECEIVED', 'ACCEPTED', 'PREPARING', 'READY'])
-      .limit(60)
-      .get()
-    const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
-    return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-  })
-  return canonical.slice(0, limit)
+/** 
+ * Query only currently active kitchen/service orders in real-time.
+ * Uses 4-second in-memory coalesced cache to protect Firestore from polling spikes.
+ */
+export async function getActiveOrders(limit = 50, forceFresh = false): Promise<Order[]> {
+  const now = Date.now()
+  const TTL_MS = 4000 // 4 seconds: shields Firestore against high-frequency polling bursts
+
+  // 1. Fast-path: Return fresh in-memory data if valid and not forced
+  if (
+    !forceFresh &&
+    activeOrdersCache.fetchedAt > 0 &&
+    now - activeOrdersCache.fetchedAt < TTL_MS
+  ) {
+    return activeOrdersCache.orders.slice(0, limit)
+  }
+
+  // 2. Request coalescing: If a query is already running, await it instead of executing duplicate Firestore queries
+  if (activeOrdersCache.inFlight) {
+    try {
+      const list = await activeOrdersCache.inFlight
+      return list.slice(0, limit)
+    } catch {
+      // Fall through to query if coalesced promise failed
+    }
+  }
+
+  // 3. Authoritative Firestore query with explicit limit
+  const fetchPromise = (async () => {
+    try {
+      const snap = await getDb()
+        .collection('orders')
+        .where('fulfilment', 'in', ['RECEIVED', 'ACCEPTED', 'PREPARING', 'READY'])
+        .limit(60)
+        .get()
+
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+
+      activeOrdersCache.orders = list
+      activeOrdersCache.fetchedAt = Date.now()
+
+      activeOrdersCache.etag = computeOrdersEtag(list)
+
+      return list
+    } finally {
+      activeOrdersCache.inFlight = null
+    }
+  })()
+
+  activeOrdersCache.inFlight = fetchPromise
+  const result = await fetchPromise
+  return result.slice(0, limit)
 }
 
 /** Query orders by specific fulfilment status (e.g. SERVED, CANCELLED) with indexing. */
 export async function getOrdersByFulfilment(status: FulfilmentStatus, limit = 50): Promise<Order[]> {
-  const list = await getCached(`orders:fulfilment:${status}`, 6000, async () => {
-    const snap = await getDb()
-      .collection('orders')
-      .where('fulfilment', '==', status)
-      .limit(60)
-      .get()
-    const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
-    return docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-  })
-  return list.slice(0, limit)
+  const snap = await getDb()
+    .collection('orders')
+    .where('fulfilment', '==', status)
+    .limit(limit)
+    .get()
+  const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+  docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+  return docs.slice(0, limit)
 }
 
 /** Efficient query for active orders at a specific table (reads max 5 docs instead of entire history). */
 export async function getActiveOrdersByTable(tableId: string): Promise<Order[]> {
+  const now = Date.now()
+  // If active orders cache is warm, filter directly from memory for 0 Firestore reads!
+  if (activeOrdersCache.fetchedAt > 0 && now - activeOrdersCache.fetchedAt < 4000) {
+    return activeOrdersCache.orders
+      .filter((o) => o.tableId === tableId)
+      .slice(0, 5)
+  }
+
   const snap = await getDb()
     .collection('orders')
     .where('tableId', '==', tableId)
@@ -584,6 +714,22 @@ export async function getOrdersByTable(tableId: string, limit = 20): Promise<Ord
     .get()
   const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
   return list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+}
+
+/** Recent orders placed by a customer phone (loyalty account area). */
+export async function getOrdersByPhone(phone: string, limit = 30): Promise<Order[]> {
+  const digits = phone.replace(/\D/g, '').replace(/^91/, '').slice(-10)
+  const variants = Array.from(new Set([digits, `+91${digits}`, `91${digits}`, phone])).filter(Boolean)
+  return getCached(`orders:phone:${digits || phone}:${limit}`, 15 * 1000, async () => {
+    const db = getDb()
+    const snap = await db
+      .collection('orders')
+      .where('customerPhone', 'in', variants)
+      .limit(limit)
+      .get()
+    const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+    return docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+  })
 }
 
 /** Allocate the next human-readable order number atomically. */
@@ -608,7 +754,11 @@ export async function createOrder(data: Omit<Order, 'id'>): Promise<Order> {
       .catch(() => {})
     invalidateCache('tables:all')
   }
-  invalidateCache('orders:')
+  invalidateActiveOrdersCache()
+  invalidateCache(`order:${ref.id}`)
+  if (data.customerPhone) {
+    invalidateCache(`orders:phone:${data.customerPhone}`)
+  }
 
   // Trigger loud mobile push alarm (ntfy / Swiggy style alert)
   sendMobileOrderAlarm({
@@ -632,12 +782,12 @@ export async function transitionOrderStatus(
 ): Promise<Order> {
   const db = getDb()
   const allowed: Record<string, string[]> = {
-    RECEIVED: ['ACCEPTED', 'CANCELLED'],
-    ACCEPTED: ['PREPARING', 'READY', 'CANCELLED', 'RECEIVED'],
-    PREPARING: ['READY', 'SERVED', 'CANCELLED', 'ACCEPTED'],
-    READY: ['SERVED', 'PREPARING', 'CANCELLED'],
-    SERVED: ['READY', 'CANCELLED'],
-    CANCELLED: ['RECEIVED'],
+    RECEIVED: ['ACCEPTED', 'PREPARING', 'READY', 'SERVED', 'CANCELLED'],
+    ACCEPTED: ['PREPARING', 'READY', 'SERVED', 'CANCELLED', 'RECEIVED'],
+    PREPARING: ['READY', 'SERVED', 'CANCELLED', 'ACCEPTED', 'RECEIVED'],
+    READY: ['SERVED', 'PREPARING', 'ACCEPTED', 'CANCELLED'],
+    SERVED: ['READY', 'PREPARING', 'ACCEPTED', 'CANCELLED'],
+    CANCELLED: ['RECEIVED', 'ACCEPTED'],
   }
   const updated = await db.runTransaction(async (tx) => {
     const ref = db.doc(`orders/${orderId}`)
@@ -667,10 +817,11 @@ export async function transitionOrderStatus(
       const remainingSnap = await db
         .collection('orders')
         .where('tableId', '==', updated.tableId)
-        .where('fulfilment', 'in', ['RECEIVED', 'ACCEPTED', 'PREPARING', 'READY'])
-        .limit(2)
+        .limit(25)
         .get()
-      const hasActiveOrders = remainingSnap.docs.some((d) => d.id !== orderId)
+      const hasActiveOrders = remainingSnap.docs.some(
+        (d) => d.id !== orderId && ['RECEIVED', 'ACCEPTED', 'PREPARING', 'READY'].includes(d.data().fulfilment)
+      )
       if (!hasActiveOrders) {
         await db
           .doc(`diningTables/${updated.tableId}`)
@@ -683,7 +834,71 @@ export async function transitionOrderStatus(
     }
   }
 
-  invalidateCache('orders:')
+  // Loyalty lifecycle: award exactly once on completion; reverse/cancel on
+  // cancellation. Failures here must never break the kitchen flow.
+  try {
+    const loyalty = await import('./loyalty')
+    if (to === 'SERVED') {
+      await loyalty.handleOrderFulfilledForLoyalty({
+        id: updated.id,
+        orderNumber: updated.orderNumber,
+        totalPaise: updated.totalPaise,
+        subtotalPaise: updated.subtotalPaise,
+        customerPhone: updated.customerPhone,
+        loyaltyAwarded: updated.loyaltyAwarded,
+        loyalty: updated.loyalty
+          ? {
+              redemptionId: updated.loyalty.redemptionId,
+              pointsUsed: updated.loyalty.pointsUsed,
+            }
+          : null,
+      })
+      invalidateActiveOrdersCache()
+    } else if (to === 'CANCELLED') {
+      await loyalty.handleOrderCancelledForLoyalty({
+        id: updated.id,
+        orderNumber: updated.orderNumber,
+        customerPhone: updated.customerPhone,
+        loyaltyAwarded: updated.loyaltyAwarded,
+        loyaltyPointsEarned: updated.loyaltyPointsEarned,
+        loyalty: updated.loyalty ? { redemptionId: updated.loyalty.redemptionId } : null,
+      })
+      invalidateActiveOrdersCache()
+    }
+  } catch (err) {
+    console.error(`[Loyalty] lifecycle hook failed for order ${orderId}:`, err)
+  }
+
+  // Update in-memory active orders cache immediately so concurrent getOrder calls see the new status
+  const existingIdx = activeOrdersCache.orders.findIndex((o) => o.id === orderId)
+  if (existingIdx !== -1) {
+    if (to === 'SERVED' || to === 'CANCELLED') {
+      activeOrdersCache.orders.splice(existingIdx, 1)
+    } else {
+      activeOrdersCache.orders[existingIdx] = {
+        ...activeOrdersCache.orders[existingIdx],
+        fulfilment: to,
+        updatedAt: serverNow(),
+      }
+    }
+  }
+
+  invalidateActiveOrdersCache()
+  invalidateCache(`order:${orderId}`)
+  if (updated.customerPhone) {
+    invalidateCache(`orders:phone:${updated.customerPhone}`)
+  }
+
+  // Broadcast instant real-time event for zero-latency customer updates
+  emitOrderStatusChange(orderId, {
+    orderId,
+    orderNumber: updated.orderNumber,
+    fulfilment: to,
+    paymentStatus: updated.paymentStatus,
+    tableLabel: updated.tableLabel,
+    updatedAt: serverNow(),
+  })
+
   return updated
 }
 
@@ -740,7 +955,12 @@ export async function updateOrder(
     }
   }
 
-  invalidateCache('orders:')
+  invalidateActiveOrdersCache()
+  invalidateCache(`order:${orderId}`)
+  const changedPhone = updates.customerPhone || prev.customerPhone
+  if (changedPhone) {
+    invalidateCache(`orders:phone:${changedPhone}`)
+  }
   const updatedSnap = await ref.get()
   return { id: updatedSnap.id, ...updatedSnap.data() } as Order
 }
@@ -806,7 +1026,29 @@ export async function recordPaymentEntry(data: {
     })
     return { ...order, paidPaise: paid, refundedPaise: refunded, paymentStatus }
   })
-  invalidateCache('orders:')
+  invalidateActiveOrdersCache()
+  invalidateCache('payments:recent')
+  invalidateCache(`order:${data.orderId}`)
+
+  // Loyalty: on a FULL refund, settle earned points + redemption per policy.
+  if (updated.paymentStatus === 'REFUNDED') {
+    try {
+      const loyalty = await import('./loyalty')
+      await loyalty.handleOrderRefundForLoyalty(
+        {
+          id: updated.id,
+          orderNumber: updated.orderNumber,
+          customerPhone: updated.customerPhone,
+          loyaltyAwarded: updated.loyaltyAwarded,
+          loyaltyPointsEarned: updated.loyaltyPointsEarned,
+          loyalty: updated.loyalty ? { redemptionId: updated.loyalty.redemptionId } : null,
+        },
+        data.amountPaise
+      )
+    } catch (err) {
+      console.error(`[Loyalty] refund settlement failed for order ${data.orderId}:`, err)
+    }
+  }
   return updated
 }
 
@@ -826,6 +1068,7 @@ export async function getOrderEvents(orderId: string): Promise<OrderEvent[]> {
   const snap = await getDb()
     .collection('orderEvents')
     .where('orderId', '==', orderId)
+    .limit(20)
     .get()
   const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as OrderEvent)
   return list.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''))
@@ -852,9 +1095,11 @@ export async function getPaymentEntries(orderId: string): Promise<PaymentEntry[]
   return list.sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''))
 }
 
-export async function getRecentPaymentEntries(limit = 2000): Promise<PaymentEntry[]> {
-  const snap = await getDb().collection('paymentEntries').orderBy('createdAt', 'desc').limit(limit).get()
-  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PaymentEntry)
+export async function getRecentPaymentEntries(limit = 300): Promise<PaymentEntry[]> {
+  return getCached(`payments:recent:${limit}`, 3 * 60 * 1000, async () => {
+    const snap = await getDb().collection('paymentEntries').orderBy('createdAt', 'desc').limit(limit).get()
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PaymentEntry)
+  })
 }
 
 // ---------------------------------------------------------------------------

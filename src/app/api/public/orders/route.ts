@@ -7,7 +7,6 @@ import {
   getTables,
   getTable,
   getActiveOrdersByTable,
-  getOrdersByTable,
   normalizeTableLabel,
   getOrderByIdempotencyKey,
   allocateOrderNumber,
@@ -15,6 +14,15 @@ import {
   type OrderItemSnapshot,
   type DiningTable,
 } from '@/lib/firebase/ordering'
+import {
+  getLoyaltyConfig,
+  getCustomerAccount,
+  getOrCreateCustomerAccount,
+  applyRedemptionForOrder,
+  bondRedemptionToOrder,
+  cancelRedemption,
+} from '@/lib/firebase/loyalty'
+import { getCustomerSession } from '@/lib/loyalty/session'
 import { hashToken, generateOrderAccessToken } from '@/lib/ordering/tokens'
 import { orderCreateSchema, normalizePhoneServerSide } from '@/lib/ordering/validation'
 import { computeQuote } from '@/lib/ordering/rules.mjs'
@@ -39,13 +47,36 @@ export async function POST(request: NextRequest) {
 
     // 2. Idempotency: same key → same order (phone must match).
     const existing = await getOrderByIdempotencyKey(input.idempotencyKey).catch(() => null)
-    const phone = normalizePhoneServerSide(input.customerPhone)
-    if (!phone) {
+    // Loyalty & Authentication: Diners must be logged in before placing an order.
+    // If authenticated via cookie session, the verified customer phone is used.
+    // If session is absent, require valid phone to resolve/create customer account or reject with LOGIN_REQUIRED.
+    let session = await getCustomerSession(request).catch(() => null)
+    let phone: string | null = null
+    let account = null
+
+    if (session && session.verified) {
+      phone = session.customerId
+      account = await getCustomerAccount(phone).catch(() => null)
+    } else {
+      const normalizedInputPhone = normalizePhoneServerSide(input.customerPhone)
+      if (!normalizedInputPhone) {
+        return NextResponse.json(
+          { error: 'Please enter your mobile number to log in before placing an order', code: 'LOGIN_REQUIRED' },
+          { status: 401 }
+        )
+      }
+      account = await getOrCreateCustomerAccount({ phone: normalizedInputPhone, name: input.customerName }).catch(() => null)
+      phone = normalizedInputPhone
+    }
+
+    if (account && account.status === 'suspended') {
       return NextResponse.json(
-        { error: 'Enter a valid 10-digit Indian mobile number starting with 6, 7, 8 or 9.' },
-        { status: 400 }
+        { error: 'Your loyalty account is suspended. Please contact restaurant staff.', code: 'SUSPENDED' },
+        { status: 403 }
       )
     }
+
+    const loyaltyCustomerPhone: string | null = phone
     if (existing) {
       if (existing.customerPhone !== phone) {
         return NextResponse.json({ error: 'Duplicate request with different details' }, { status: 409 })
@@ -145,7 +176,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const name = input.customerName.trim()
+    const name = (input.customerName || account?.name || session?.name || 'Diner').trim()
     if (!name) return NextResponse.json({ error: 'Customer name is required' }, { status: 400 })
 
     // 4. Authoritative menu + availability + options validation.
@@ -214,17 +245,64 @@ export async function POST(request: NextRequest) {
     // 5. Server-side money.
     const quote = computeQuote(quoteLines, ordering.taxRateBps, ordering.serviceChargePaise)
 
+    // 5b. Loyalty redemption (previously earned points only — the current
+    // order's possible award is NOT spendable here by design).
+    let redemption: Awaited<ReturnType<typeof applyRedemptionForOrder>> | null = null
+    if (input.redeemRewardId && loyaltyCustomerPhone) {
+      const cfg = await getLoyaltyConfig().catch(() => null)
+      if (!cfg || !cfg.enabled) {
+        return NextResponse.json({ error: 'The loyalty program is currently paused', code: 'LOYALTY_DISABLED' }, { status: 409 })
+      }
+      if (cfg.maxRedemptionsPerOrder < 1) {
+        return NextResponse.json({ error: 'Reward redemption is currently disabled', code: 'REDEEM_DISABLED' }, { status: 409 })
+      }
+      try {
+        redemption = await applyRedemptionForOrder({
+          customerPhone: loyaltyCustomerPhone,
+          rewardId: input.redeemRewardId,
+          subtotalPaise: quote.subtotalPaise,
+        })
+      } catch (e) {
+        const code = e instanceof Error ? e.message : 'REDEEM_FAILED'
+        const friendly: Record<string, string> = {
+          REWARD_NOT_FOUND: 'That reward no longer exists',
+          REWARD_INACTIVE: 'That reward is no longer available',
+          REWARD_EXPIRED: 'That reward offer has expired',
+          NOT_STARTED: 'That reward is not active yet',
+          OUT_OF_STOCK: 'That reward is sold out',
+          MIN_ORDER: 'Your order is below the minimum value for this reward',
+          NOT_ENOUGH_POINTS: 'Not enough points for this reward',
+          NOT_VERIFIED: 'Verify your account to redeem rewards',
+          CUSTOMER_LIMIT: 'You have already claimed this reward the maximum number of times',
+          LOYALTY_DISABLED: 'The loyalty program is currently paused',
+        }
+        return NextResponse.json(
+          { error: friendly[code] ?? 'Could not redeem this reward', code },
+          { status: 409 }
+        )
+      }
+    }
+
+    const payableTotalPaise = redemption ? Math.max(0, quote.totalPaise - redemption.discountPaise) : quote.totalPaise
+
     // 6. Stale-cart protection: client quote mismatch → 409 with server quote.
+    const heldDiscountPaise = redemption ? redemption.discountPaise : 0
     if (
       input.clientTotalPaise !== undefined &&
-      input.clientTotalPaise !== quote.totalPaise &&
+      (input.clientTotalPaise !== payableTotalPaise ||
+        (input.clientRedeemDiscountPaise !== undefined &&
+          input.clientRedeemDiscountPaise !== heldDiscountPaise)) &&
       !input.confirmUpdatedTotal
     ) {
+      // Roll back any held redemption before surfacing the conflict.
+      if (redemption) {
+        await cancelRedemption(redemption.redemptionId, 'Order checkout quote conflict — points restored').catch(() => {})
+      }
       return NextResponse.json(
         {
           error: 'Prices changed while you were ordering. Please confirm the updated total.',
           code: 'PRICE_CHANGED',
-          quote,
+          quote: { ...quote, totalPaise: payableTotalPaise, discountPaise: heldDiscountPaise },
         },
         { status: 409 }
       )
@@ -233,30 +311,52 @@ export async function POST(request: NextRequest) {
     // 7. Persist (order number allocated atomically; snapshots immutable).
     const { orderNumber } = await allocateOrderNumber()
     const accessToken = generateOrderAccessToken()
-    const order = await createOrder({
-      restaurantId: 'default',
-      orderNumber,
-      tableId,
-      tableLabel,
-      customerName: name.slice(0, 100),
-      customerPhone: phone,
-      items: snapshots,
-      subtotalPaise: quote.subtotalPaise,
-      taxPaise: quote.taxPaise,
-      chargePaise: quote.chargePaise,
-      totalPaise: quote.totalPaise,
-      fulfilment: 'RECEIVED',
-      paymentStatus: 'UNPAID',
-      paymentMethod: 'COUNTER',
-      paidPaise: 0,
-      refundedPaise: 0,
-      notes: input.notes?.trim().slice(0, 280) || undefined,
-      idempotencyKey: input.idempotencyKey,
-      accessTokenHash: hashToken(accessToken),
-      itemIds: snapshots.map((s) => s.itemId),
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    })
+    let order
+    try {
+      order = await createOrder({
+        restaurantId: 'default',
+        orderNumber,
+        tableId,
+        tableLabel,
+        customerName: name.slice(0, 100),
+        customerPhone: phone,
+        items: snapshots,
+        subtotalPaise: quote.subtotalPaise,
+        taxPaise: quote.taxPaise,
+        chargePaise: quote.chargePaise,
+        totalPaise: payableTotalPaise,
+        fulfilment: 'RECEIVED',
+        paymentStatus: 'UNPAID',
+        paymentMethod: 'COUNTER',
+        paidPaise: 0,
+        refundedPaise: 0,
+        notes: input.notes?.trim().slice(0, 280) || undefined,
+        idempotencyKey: input.idempotencyKey,
+        accessTokenHash: hashToken(accessToken),
+        itemIds: snapshots.map((s) => s.itemId),
+        loyalty: redemption
+          ? {
+              redemptionId: redemption.redemptionId,
+              rewardId: redemption.reward.id,
+              rewardName: redemption.reward.name,
+              discountPaise: redemption.discountPaise,
+              pointsUsed: redemption.pointsUsed,
+            }
+          : null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      })
+    } catch (err) {
+      // Order creation failed after points were held → restore them explicitly.
+      if (redemption) {
+        await cancelRedemption(redemption.redemptionId, 'Order creation failed — points restored').catch(() => {})
+      }
+      throw err
+    }
+
+    if (redemption) {
+      await bondRedemptionToOrder(redemption.redemptionId, order.id, orderNumber).catch(() => {})
+    }
 
     // Audit event for creation.
     const { getAdminFirestore } = await import('@/lib/firebase/admin')
@@ -280,6 +380,13 @@ export async function POST(request: NextRequest) {
         totalPaise: order.totalPaise,
         tableLabel,
         accessToken,
+        loyalty: redemption
+          ? {
+              pointsUsed: redemption.pointsUsed,
+              discountPaise: redemption.discountPaise,
+              rewardName: redemption.reward.name,
+            }
+          : null,
       },
       { status: 201 }
     )

@@ -19,7 +19,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     }
     try {
       const order = await transitionOrderStatus(id, parsed.data.to, { uid: user.uid, email: user.email }, parsed.data.reason?.trim())
-      return NextResponse.json({ success: true, fulfilment: order.fulfilment }, { status: 200 })
+      return NextResponse.json({ success: true, fulfilment: order.fulfilment, order }, { status: 200 })
     } catch (e) {
       const msg = e instanceof Error ? e.message : ''
       if (msg === 'NOT_FOUND') return NextResponse.json({ error: 'Order not found' }, { status: 404 })

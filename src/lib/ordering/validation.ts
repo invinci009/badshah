@@ -145,9 +145,12 @@ export const orderCreateSchema = z.object({
   notes: z.string().max(280).optional(),
   idempotencyKey: z.string().uuid(),
   clientTotalPaise: z.number().int().min(0).max(100000000).optional(),
+  clientRedeemDiscountPaise: z.number().int().min(0).max(100000000).optional(),
   confirmUpdatedTotal: z.boolean().optional(),
   existingOrderId: z.string().min(1).max(100).optional(),
   activeOrderAccessToken: z.string().min(1).max(200).optional(),
+  /** Checkout reward redemption — validated and applied server-side only. */
+  redeemRewardId: z.string().max(100).optional(),
   items: orderLineSchema.array().min(1).max(30),
 })
 

@@ -56,7 +56,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       console.warn('Dashboard getCampaigns failed:', e.message)
       return []
     }),
-    getCached('dashboard:events', 3 * 60 * 1000, () => getEvents({ limit: 200 })).catch((e) => {
+    getCached('dashboard:events', 10 * 60 * 1000, () => getEvents({ limit: 100 })).catch((e) => {
       console.warn('Dashboard getEvents failed:', e.message)
       return []
     }),
@@ -98,9 +98,9 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
     }
   }
 
-  // 5-7. Fetch & cache session analytics — 3-minute TTL eliminates 300+ reads per dashboard navigation
-  const sessionAnalytics = await getCached('dashboard:session_analytics', 3 * 60 * 1000, async () => {
-    const sessionIds = [...new Set(events.map((e) => e.sessionId).filter(Boolean))].slice(0, 100) as string[]
+  // 5-7. Fetch & cache session analytics — 10-minute TTL with bounded 30 sessions eliminates 200+ redundant reads
+  const sessionAnalytics = await getCached('dashboard:session_analytics', 10 * 60 * 1000, async () => {
+    const sessionIds = [...new Set(events.map((e) => e.sessionId).filter(Boolean))].slice(0, 30) as string[]
     const sessionDocs = await Promise.all(
       sessionIds.map((sessionId) => getSession(sessionId).catch(() => null))
     )

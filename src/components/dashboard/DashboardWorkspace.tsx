@@ -14,6 +14,7 @@ import KitchenTab from './KitchenTab'
 import ReportsTab from './ReportsTab'
 import SettingsTab, { type BusinessSettings } from './SettingsTab'
 import CustomersPortalTab, { type CustomerDetail } from './CustomersPortalTab'
+import LoyaltyTab from './LoyaltyTab'
 import MobileBottomNav from './MobileBottomNav'
 import MobileMenuDrawer from './MobileMenuDrawer'
 import { OrderAnnouncerProvider } from './OrderAnnouncerContext'
@@ -36,6 +37,7 @@ import {
   ChefHat,
   BarChart3,
   Receipt,
+  Gift,
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -54,11 +56,11 @@ interface DashboardWorkspaceProps {
   userEmail?: string
 }
 
-type TabType = 'overview' | 'customers' | 'responses' | 'campaigns' | 'feedback' | 'menu' | 'orderMenu' | 'orders' | 'kitchen' | 'reports' | 'tables' | 'settings'
+type TabType = 'overview' | 'customers' | 'responses' | 'campaigns' | 'feedback' | 'menu' | 'orderMenu' | 'orders' | 'kitchen' | 'reports' | 'tables' | 'loyalty' | 'settings'
 
 export type { TabType }
 
-const VALID_TABS: TabType[] = ['overview', 'customers', 'responses', 'campaigns', 'feedback', 'menu', 'orderMenu', 'orders', 'kitchen', 'reports', 'tables', 'settings']
+const VALID_TABS: TabType[] = ['overview', 'customers', 'responses', 'campaigns', 'feedback', 'menu', 'orderMenu', 'orders', 'kitchen', 'reports', 'tables', 'loyalty', 'settings']
 
 export default function DashboardWorkspace({
   initialTab: propInitialTab,
@@ -128,6 +130,7 @@ export default function DashboardWorkspace({
     },
     { key: 'menu', label: 'Menu', icon: Utensils, badge: menuItems.length },
     { key: 'orderMenu', label: 'Order Menu', icon: ClipboardList, badge: orderMenuCount },
+    { key: 'loyalty', label: 'Loyalty', icon: Gift },
     { key: 'orders', label: 'Orders', icon: Receipt },
     { key: 'kitchen', label: 'Kitchen', icon: ChefHat },
     { key: 'reports', label: 'Reports', icon: BarChart3 },
@@ -257,6 +260,7 @@ export default function DashboardWorkspace({
           <TablesTab tables={tables} portalSlug={portalSlug} onRefresh={handleRefresh} />
         )}
         {activeTab === 'orderMenu' && <OrderMenuTab onRefresh={handleRefresh} />}
+        {activeTab === 'loyalty' && <LoyaltyTab onRefresh={handleRefresh} />}
         {activeTab === 'orders' && <OrdersTab tables={tables.map((t) => ({ id: t.id, label: t.label }))} onRefresh={handleRefresh} />}
         {activeTab === 'kitchen' && <KitchenTab />}
         {activeTab === 'reports' && <ReportsTab />}

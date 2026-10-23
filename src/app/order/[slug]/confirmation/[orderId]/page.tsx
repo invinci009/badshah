@@ -1,9 +1,9 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { Loader2, AlertTriangle, CheckCircle2, ChefHat, BellRing, Receipt, Phone, RefreshCw, XCircle, PartyPopper } from 'lucide-react'
+import { Loader2, AlertTriangle, CheckCircle2, ChefHat, BellRing, Receipt, Phone, RefreshCw, XCircle, PartyPopper, Sparkles, Gift, Star, ArrowRight, Copy, Check, Crown } from 'lucide-react'
 import { formatPaise, formatTableDisplay } from '@/lib/ordering/rules.mjs'
 
 const STATUS_META: Record<string, { label: string; hint: string }> = {
@@ -39,6 +39,11 @@ interface TrackedOrder {
   paymentInstructions: string
   restaurantPhone: string | null
   createdAt: string
+  // Loyalty context
+  loyaltyAwarded?: boolean
+  loyaltyPointsEarned?: number
+  loyaltyDiscountPaise?: number
+  loyaltyRewardName?: string | null
 }
 
 function readAccessToken(orderId: string): string | null {
@@ -69,20 +74,45 @@ export default function OrderConfirmationPage() {
   const [order, setOrder] = useState<TrackedOrder | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [claiming, setClaiming] = useState(false)
+  const [claimMsg, setClaimMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [loyaltyLoggedIn, setLoyaltyLoggedIn] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const etagRef = useRef<string | null>(null)
 
   useEffect(() => {
     setMounted(true)
     const token = readAccessToken(orderId)
     setAccessToken(token)
+    // Check if customer is currently logged in to loyalty
+    fetch('/api/public/loyalty/auth', { cache: 'no-store' })
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json().catch(() => null)
+          if (data?.customer?.verified) setLoyaltyLoggedIn(true)
+        }
+      })
+      .catch(() => {})
   }, [orderId])
-
-  const fetchOrder = useCallback(async (silent = false) => {
+  const fetchOrder = useCallback(async (silent = false, force = false) => {
     if (!accessToken) return
     if (!silent) setRefreshing(true)
     try {
-      const res = await fetch(`/api/public/orders/${orderId}?token=${encodeURIComponent(accessToken)}`)
+      const headers: Record<string, string> = { 'Cache-Control': 'no-cache' }
+      if (silent && !force && etagRef.current) headers['If-None-Match'] = etagRef.current
+
+      const res = await fetch(`/api/public/orders/${orderId}?token=${encodeURIComponent(accessToken)}`, { headers })
+      if (res.status === 304) {
+        return
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Could not load order')
+      }
+      const newEtag = res.headers.get('ETag')
+      if (newEtag) etagRef.current = newEtag
+
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Could not load order')
       setOrder(data)
       setError(null)
       if (data.fulfilment === 'SERVED' || data.fulfilment === 'CANCELLED') {
@@ -95,23 +125,100 @@ export default function OrderConfirmationPage() {
     } finally {
       setRefreshing(false)
     }
-  }, [accessToken, orderId])
+  }, [accessToken, orderId, slug])
 
+  const handleClaimPoints = async () => {
+    if (!order) return
+    setClaiming(true)
+    setClaimMsg(null)
+    try {
+      const res = await fetch('/api/public/loyalty/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setClaimMsg({ ok: true, text: data.message || `+${data.awarded} points claimed!` })
+        fetchOrder(true, true)
+      } else {
+        setClaimMsg({ ok: false, text: data.error || 'Could not claim points' })
+      }
+    } catch {
+      setClaimMsg({ ok: false, text: 'Failed to claim points' })
+    } finally {
+      setClaiming(false)
+    }
+  }
+
+  // 1. Instant Real-time Server-Sent Events (SSE) Stream
+  useEffect(() => {
+    if (!accessToken || !orderId) return
+    if (order && (order.fulfilment === 'SERVED' || order.fulfilment === 'CANCELLED')) return
+
+    let es: EventSource | null = null
+    try {
+      es = new EventSource(`/api/public/orders/${orderId}/events?token=${encodeURIComponent(accessToken)}`)
+      es.onmessage = (event) => {
+        try {
+          if (!event.data || event.data.startsWith(':')) return
+          const payload = JSON.parse(event.data)
+          if (payload?.fulfilment) {
+            setOrder((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    fulfilment: payload.fulfilment,
+                    paymentStatus: payload.paymentStatus || prev.paymentStatus,
+                  }
+                : prev
+            )
+            // Silently sync any additional metadata
+            fetchOrder(true, true)
+          }
+        } catch {}
+      }
+      es.onerror = () => {
+        // Handled gracefully by fallback poller
+        if (es) {
+          es.close()
+          es = null
+        }
+      }
+    } catch {}
+
+    return () => {
+      if (es) es.close()
+    }
+  }, [accessToken, orderId, order?.fulfilment, fetchOrder])
+
+  // 2. Adaptive Fast-Polling Fallback (every 3.5 seconds while active)
   useEffect(() => {
     if (!accessToken) return
-    const raf = requestAnimationFrame(() => fetchOrder())
-    // If order is served or cancelled, final status is reached — stop polling
+    fetchOrder()
+
     if (order && (order.fulfilment === 'SERVED' || order.fulfilment === 'CANCELLED')) {
-      return () => cancelAnimationFrame(raf)
+      return
     }
+
     const t = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         fetchOrder(true)
       }
-    }, 20000)
+    }, 3500)
+
+    const onVisible = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        fetchOrder(true, true)
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', onVisible)
+
     return () => {
-      cancelAnimationFrame(raf)
       clearInterval(t)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', onVisible)
     }
   }, [accessToken, fetchOrder, order?.fulfilment])
 
@@ -182,7 +289,24 @@ export default function OrderConfirmationPage() {
             {isCancelled ? <XCircle className="w-10 h-10" /> : isServed ? <PartyPopper className="w-10 h-10" /> : <CheckCircle2 className="w-10 h-10" />}
           </div>
           <h1 className="text-2xl font-extrabold">{isServed ? 'Enjoy Your Meal!' : isCancelled ? 'Order Cancelled' : 'Order Placed!'}</h1>
-          <p className="text-3xl font-black tracking-wide text-amber-700">{order.orderNumber}</p>
+          <div className="flex items-center justify-center gap-2">
+            <p className="text-3xl font-black tracking-wide text-amber-700">{order.orderNumber}</p>
+            <button
+              type="button"
+              onClick={() => {
+                if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                  navigator.clipboard.writeText(order.orderNumber).catch(() => {})
+                }
+                setCopied(true)
+                setTimeout(() => setCopied(false), 2000)
+              }}
+              className="p-1.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-600 cursor-pointer transition-colors"
+              title="Copy Order ID"
+            >
+              {copied ? <Check className="w-4 h-4 text-emerald-600" /> : <Copy className="w-4 h-4" />}
+            </button>
+          </div>
+          {copied && <p className="text-[11px] font-bold text-emerald-600 animate-in fade-in">Order ID copied to clipboard!</p>}
           {order.tableLabel && <p className="text-sm font-bold text-stone-600">{formatTableDisplay(order.tableLabel)}</p>}
 
           <div className={`p-4 rounded-2xl border flex items-center gap-3 text-left ${isCancelled ? 'bg-rose-50 border-rose-200' : 'bg-amber-50 border-amber-200'}`}>
@@ -192,6 +316,105 @@ export default function OrderConfirmationPage() {
               <p className="text-xs text-stone-600">{meta.hint}</p>
             </div>
           </div>
+
+          {/* Loyalty: confirmation of points earned / reward applied / claim prompt */}
+          {!isCancelled && (
+            <div className={`p-4 rounded-2xl text-left space-y-2 border ${
+              order.loyaltyAwarded
+                ? 'bg-gradient-to-br from-emerald-50 via-teal-50 to-amber-50 border-emerald-300 shadow-xs'
+                : 'bg-gradient-to-r from-amber-500/10 via-amber-400/15 to-yellow-500/10 border-amber-300/60'
+            }`}>
+              <div className="flex items-start gap-3">
+                <div className={`w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 mt-0.5 shadow-xs ${
+                  order.loyaltyAwarded ? 'bg-emerald-600 text-white' : 'bg-amber-500 text-stone-950'
+                }`}>
+                  {order.loyaltyAwarded ? <PartyPopper className="w-4 h-4" /> : <Crown className="w-4 h-4 fill-current" />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-1">
+                    <p className="text-xs font-black text-stone-900 flex items-center gap-1.5">
+                      Badshah VIP Rewards
+                    </p>
+                    {order.loyaltyAwarded ? (
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-600 text-white">
+                        Credited
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
+                        Reserved
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Reward discount note */}
+                  {(order.loyaltyDiscountPaise ?? 0) > 0 && (
+                    <p className="text-xs text-emerald-800 font-bold mt-1 flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                      {order.loyaltyRewardName ? (
+                        <>Reward applied: <b>{order.loyaltyRewardName}</b> (saved {formatPaise(order.loyaltyDiscountPaise!)}).</>
+                      ) : (
+                        <>VIP Reward saved <b>{formatPaise(order.loyaltyDiscountPaise!)}</b> on this bill.</>
+                      )}
+                    </p>
+                  )}
+
+                  {/* Points earned / claim prompt */}
+                  {order.loyaltyAwarded ? (
+                    <div className="mt-1 space-y-1.5">
+                      <p className="text-xs text-emerald-800 font-extrabold flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        +{order.loyaltyPointsEarned} VIP points added to your loyalty balance!
+                      </p>
+                      <Link
+                        href={`/order/${slug}/menu?vip=1${order.tableLabel ? `&table=${encodeURIComponent(order.tableLabel)}` : ''}`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all shadow-xs"
+                      >
+                        <Crown className="w-3.5 h-3.5" /> View VIP Card &amp; Rewards <ArrowRight className="w-3 h-3" />
+                      </Link>
+                    </div>
+                  ) : isServed ? (
+                    <div className="mt-2 space-y-1.5">
+                      {claimMsg && (
+                        <p className={`text-xs font-bold ${claimMsg.ok ? 'text-emerald-700' : 'text-rose-600'}`}>
+                          {claimMsg.text}
+                        </p>
+                      )}
+                      {loyaltyLoggedIn ? (
+                        <button
+                          type="button"
+                          onClick={handleClaimPoints}
+                          disabled={claiming}
+                          className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 shadow-xs"
+                        >
+                          {claiming ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Star className="w-3.5 h-3.5" />}
+                          Claim your loyalty points
+                        </button>
+                      ) : (
+                        <Link
+                          href={`/order/${slug}/menu?vip=1${order.tableLabel ? `&table=${encodeURIComponent(order.tableLabel)}` : ''}`}
+                          className="inline-flex items-center gap-1 text-xs font-bold text-amber-700 hover:text-amber-800 underline"
+                        >
+                          Join or log in to collect your points <ArrowRight className="w-3 h-3" />
+                        </Link>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="mt-1 space-y-1">
+                      <p className="text-xs text-stone-600">
+                        You&apos;ll earn <b className="text-amber-800 font-black">+{order.loyaltyPointsEarned || 20} VIP points</b> automatically once your food is served.{' '}
+                        <Link
+                          href={`/order/${slug}/menu?vip=1${order.tableLabel ? `&table=${encodeURIComponent(order.tableLabel)}` : ''}`}
+                          className="text-amber-700 font-bold hover:underline inline-flex items-center gap-0.5 ml-1"
+                        >
+                          View rewards club <ArrowRight className="w-3 h-3" />
+                        </Link>
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           {isCancelled && order.cancellationReason && (
             <div className="p-3.5 rounded-2xl bg-rose-50/90 border border-rose-200 text-left space-y-1 animate-in fade-in duration-200">
@@ -204,8 +427,19 @@ export default function OrderConfirmationPage() {
             <div className="flex items-center justify-between px-1 pt-1" aria-label="Order progress">
               {steps.map((s, i) => (
                 <div key={s} className="flex-1 flex flex-col items-center gap-1.5">
-                  <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-extrabold transition-all duration-300 ${i < stepIdx ? 'bg-emerald-500 text-white shadow-xs' : i === stepIdx ? 'bg-amber-600 text-white shadow-md shadow-amber-600/40 ring-4 ring-amber-400/20 scale-110' : 'bg-stone-200 text-stone-400'}`}>
-                    {i < stepIdx ? <CheckCircle2 className="w-3.5 h-3.5" /> : i + 1}
+                  <div className="relative">
+                    {i === stepIdx && !isServed && (
+                      <span className="absolute -inset-1 rounded-full bg-amber-400/35 animate-ping pointer-events-none" />
+                    )}
+                    <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-extrabold transition-all duration-300 relative ${
+                      i < stepIdx
+                        ? 'bg-emerald-500 text-white shadow-xs'
+                        : i === stepIdx
+                        ? 'bg-amber-600 text-white shadow-md shadow-amber-600/40 ring-4 ring-amber-400/20 scale-110'
+                        : 'bg-stone-200 text-stone-400'
+                    }`}>
+                      {i < stepIdx ? <CheckCircle2 className="w-3.5 h-3.5" /> : i + 1}
+                    </div>
                   </div>
                   <span className={`text-[9px] font-bold capitalize ${i === stepIdx ? 'text-amber-800 font-extrabold' : i < stepIdx ? 'text-stone-700' : 'text-stone-400'}`}>{s.toLowerCase()}</span>
                 </div>
@@ -217,6 +451,29 @@ export default function OrderConfirmationPage() {
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} /> Refresh status
           </button>
         </div>
+
+        {/* Guest Feedback & Rating Card */}
+        <a
+          href={`/r/${slug}?table=${encodeURIComponent(order.tableLabel || '')}`}
+          className="block p-4 rounded-2xl bg-white border border-stone-200/90 hover:border-amber-400 text-stone-800 transition-all shadow-xs group"
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-amber-50 border border-amber-200 text-amber-500 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
+                <Star className="w-5 h-5 fill-amber-400 text-amber-400" />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-black text-stone-900">How is everything tasting?</p>
+                <p className="text-[11px] text-stone-500">Tap to rate your experience &amp; earn VIP perks</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-0.5 text-amber-400 shrink-0">
+              {[...Array(5)].map((_, i) => (
+                <Star key={i} className="w-3.5 h-3.5 fill-amber-400" />
+              ))}
+            </div>
+          </div>
+        </a>
 
         {/* Bill */}
         <div className="p-5 rounded-2xl bg-white border border-stone-200 shadow-sm space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
@@ -236,6 +493,15 @@ export default function OrderConfirmationPage() {
             <div className="flex justify-between text-stone-600"><span>Subtotal</span><span>{formatPaise(order.subtotalPaise)}</span></div>
             <div className="flex justify-between text-stone-600"><span>Tax</span><span>{formatPaise(order.taxPaise)}</span></div>
             {order.chargePaise > 0 && <div className="flex justify-between text-stone-600"><span>Charges</span><span>{formatPaise(order.chargePaise)}</span></div>}
+            {(order.loyaltyDiscountPaise ?? 0) > 0 && (
+              <div className="flex justify-between text-emerald-600 font-semibold">
+                <span className="flex items-center gap-1.5">
+                  <Gift className="w-3.5 h-3.5 text-amber-600" />
+                  {order.loyaltyRewardName ? `Reward: ${order.loyaltyRewardName}` : 'Reward Discount'}
+                </span>
+                <span>−{formatPaise(order.loyaltyDiscountPaise!)}</span>
+              </div>
+            )}
             <div className="flex justify-between font-extrabold text-lg pt-1"><span>Total</span><span className="text-amber-700">{formatPaise(order.totalPaise)}</span></div>
             <p className="text-[11px] text-stone-500">Payment: {order.paymentStatus === 'PAID' ? 'Paid' : 'Pay at counter'} • {order.paymentInstructions}</p>
           </div>

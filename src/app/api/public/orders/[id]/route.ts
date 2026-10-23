@@ -30,6 +30,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       cancellationReason = cancelEv?.reason || null
     }
 
+    const etag = `W/"${order.id}-${order.fulfilment}-${order.paymentStatus}-${order.updatedAt || order.createdAt}"`
+    if (request.headers.get('if-none-match') === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: {
+          ETag: etag,
+          'Cache-Control': 'no-cache',
+        },
+      })
+    }
+
     return NextResponse.json(
       {
         orderId: order.id,
@@ -48,8 +59,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         paymentInstructions: 'Please pay at the counter. Show this order number to the staff.',
         restaurantPhone: settings?.contact?.phone || config.contact.phone || null,
         createdAt: order.createdAt,
+        // Loyalty context for the confirmation page.
+        loyaltyAwarded: order.loyaltyAwarded ?? false,
+        loyaltyPointsEarned: order.loyaltyPointsEarned ?? 0,
+        loyaltyDiscountPaise: order.loyalty?.discountPaise ?? 0,
+        loyaltyRewardName: order.loyalty?.rewardName ?? null,
       },
-      { status: 200 }
+      {
+        status: 200,
+        headers: {
+          ETag: etag,
+          'Cache-Control': 'no-cache',
+        },
+      }
     )
   } catch (error) {
     console.error('Public order tracking error:', error)

@@ -120,11 +120,12 @@ export default function OrdersTab({
   tables,
   onRefresh,
 }: {
-  tables: Array<{ id: string; label: string }>
+  tables: Array<{ id: string; label: string; state?: string }>
   onRefresh: () => void
 }) {
   const [orders, setOrders] = useState<OrderRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [justArrivedCount, setJustArrivedCount] = useState(0)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('active')
   const [payFilter, setPayFilter] = useState('all')
@@ -157,9 +158,8 @@ export default function OrdersTab({
   const [payKind, setPayKind] = useState<'collection' | 'refund'>('collection')
 
   // Notification message & live arrivals
-  const { isVoiceEnabled, toggleVoice, announceOrderDirectly } = useOrderAnnouncer()
+  const { isVoiceEnabled, toggleVoice, announceOrderDirectly, activeOrders, refreshActiveOrders } = useOrderAnnouncer()
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
-  const [justArrivedCount, setJustArrivedCount] = useState(0)
   const prevIds = useRef<Set<string>>(new Set())
   const newOrderIdsRef = useRef<Set<string>>(new Set())
   const ordersEtagRef = useRef<string | null>(null)
@@ -179,7 +179,9 @@ export default function OrdersTab({
           headers['If-None-Match'] = ordersEtagRef.current
         }
 
-        const res = await fetch(`/api/business/orders?${params.toString()}`, { headers })
+        const res = await fetch(`/api/business/orders?${params.toString()}`, {
+          headers,
+        })
         if (res.status === 304) {
           // Zero changes on server — skip re-rendering and JSON parsing!
           return
@@ -228,31 +230,62 @@ export default function OrdersTab({
     [search, tableFilter, statusFilter, announceOrderDirectly]
   )
 
+  // Sync active orders directly from centralized OrderAnnouncerContext when on default active view
   useEffect(() => {
+    if (statusFilter === 'active' && !search.trim() && tableFilter === 'all') {
+      if (activeOrders) {
+        setOrders(
+          activeOrders.map((o) => ({
+            id: o.id,
+            orderNumber: o.orderNumber,
+            tableId: o.tableId || null,
+            tableLabel: o.tableLabel || null,
+            customerName: o.customerName || 'Guest',
+            customerPhone: o.customerPhone || '',
+            itemCount: o.itemCount || (o.items?.reduce((s, i) => s + i.quantity, 0) ?? 0),
+            totalPaise: o.totalPaise || 0,
+            paidPaise: o.paidPaise || 0,
+            refundedPaise: o.refundedPaise || 0,
+            fulfilment: o.fulfilment,
+            paymentStatus: o.paymentStatus || 'UNPAID',
+            notes: o.notes,
+            createdAt: o.createdAt || new Date().toISOString(),
+            items: o.items,
+          }))
+        )
+        setLoading(false)
+      }
+    }
+  }, [activeOrders, statusFilter, search, tableFilter])
+
+  useEffect(() => {
+    // If viewing default active orders, activeOrders from context already maintains live state
+    if (statusFilter === 'active' && !search.trim() && tableFilter === 'all') {
+      return
+    }
+
     fetchOrders()
 
-    // Real-time 10-second automatic polling when active
+    // 5-second background polling for custom filter views
     const t = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        fetchOrders(true)
-      }
-    }, 10000)
+      fetchOrders(true)
+    }, 5000)
 
-    // Immediate sync when tab gains visibility or focus
+    // Immediate sync when tab gains visibility, window focus, or network reconnects
     const onVis = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        fetchOrders(true)
-      }
+      fetchOrders(true)
     }
     document.addEventListener('visibilitychange', onVis)
     window.addEventListener('focus', onVis)
+    window.addEventListener('online', onVis)
 
     return () => {
       clearInterval(t)
       document.removeEventListener('visibilitychange', onVis)
       window.removeEventListener('focus', onVis)
+      window.removeEventListener('online', onVis)
     }
-  }, [fetchOrders])
+  }, [fetchOrders, statusFilter, search, tableFilter])
 
   const filtered = useMemo(() => {
     return orders.filter((o) => {
@@ -298,9 +331,29 @@ export default function OrdersTab({
     }
   }
 
-  // Quick Inline Status Update from the Order Card
+  const handleUpdateTableState = async (tableId: string, nextState: 'available' | 'occupied' | 'cleaning') => {
+    try {
+      await fetch('/api/business/tables', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: tableId, state: nextState }),
+      })
+      onRefresh()
+    } catch {}
+  }
+
+  // Quick Inline Status Update from the Order Card (Optimistic & Seamless)
   const doQuickTransition = async (orderId: string, to: string) => {
     setInlineBusyId(orderId)
+    // Instant optimistic update
+    setOrders((prev) =>
+      prev.map((o) => (o.id === orderId ? { ...o, fulfilment: to } : o))
+    )
+    if (detail?.order?.id === orderId) {
+      setDetail((prev) =>
+        prev ? { ...prev, order: { ...prev.order, fulfilment: to } } : null
+      )
+    }
     try {
       const res = await fetch(`/api/business/orders/${orderId}/status`, {
         method: 'PATCH',
@@ -309,19 +362,21 @@ export default function OrdersTab({
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Transition failed')
-      fetchOrders(true)
-      onRefresh()
-      if (selectedId === orderId) {
-        openDetail(orderId)
+      if (data.order && detail?.order?.id === orderId) {
+        setDetail((prev) => (prev ? { ...prev, order: data.order } : null))
       }
+      fetchOrders(true)
+      refreshActiveOrders()
+      onRefresh()
     } catch (err) {
+      fetchOrders(true)
       alert(err instanceof Error ? err.message : 'Status update failed')
     } finally {
       setInlineBusyId(null)
     }
   }
 
-  // Detail Modal Status Transition
+  // Detail Modal Status Transition (Seamless In-Place Update — No Blanking)
   const doTransition = async (to: string) => {
     if (!selectedId) return
     if (to === 'CANCELLED') {
@@ -329,6 +384,13 @@ export default function OrdersTab({
       return
     }
     setActionBusy(true)
+    // Instant optimistic update
+    setDetail((prev) =>
+      prev ? { ...prev, order: { ...prev.order, fulfilment: to } } : null
+    )
+    setOrders((prev) =>
+      prev.map((o) => (o.id === selectedId ? { ...o, fulfilment: to } : o))
+    )
     try {
       const res = await fetch(`/api/business/orders/${selectedId}/status`, {
         method: 'PATCH',
@@ -338,10 +400,14 @@ export default function OrdersTab({
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Transition failed')
       setMsg({ ok: true, text: `Order updated to ${to}` })
-      openDetail(selectedId)
+      if (data?.order) {
+        setDetail((prev) => (prev ? { ...prev, order: data.order } : null))
+      }
       fetchOrders(true)
+      refreshActiveOrders()
       onRefresh()
     } catch (e) {
+      fetchOrders(true)
       setMsg({ ok: false, text: e instanceof Error ? e.message : 'Transition failed' })
     } finally {
       setActionBusy(false)
@@ -879,9 +945,43 @@ export default function OrdersTab({
                   )}
 
                   {o.fulfilment === 'SERVED' && (
-                    <span className="text-xs text-slate-400 font-medium flex items-center gap-1 py-1 px-2 rounded-lg bg-slate-950">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Order Completed
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs text-slate-400 font-medium flex items-center gap-1 py-1 px-2 rounded-lg bg-slate-950">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /> Served
+                      </span>
+                      {(() => {
+                        const table = tables.find((t) => t.id === o.tableId || t.label === o.tableLabel)
+                        if (!table) return null
+                        return (
+                          <div className="flex items-center gap-1">
+                            {table.state === 'cleaning' ? (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateTableState(table.id, 'available')}
+                                className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-sky-500/20 text-sky-300 border border-sky-500/40 hover:bg-emerald-500/20 hover:text-emerald-300 transition-colors cursor-pointer flex items-center gap-1"
+                                title="Table is being cleaned. Click to mark as Available"
+                              >
+                                <span>🧹 Cleaning</span>
+                                <span className="underline ml-0.5 text-white/90">→ Free Table</span>
+                              </button>
+                            ) : table.state === 'occupied' ? (
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateTableState(table.id, 'cleaning')}
+                                className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 hover:bg-sky-500/20 hover:text-sky-300 transition-colors cursor-pointer flex items-center gap-1"
+                                title="Mark table for cleaning"
+                              >
+                                <span>🧹 Set Cleaning</span>
+                              </button>
+                            ) : (
+                              <span className="text-[10px] font-semibold text-emerald-400 px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                                🟢 Table Free
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })()}
+                    </div>
                   )}
 
                   {/* View Details / Edit Trigger */}
@@ -1107,11 +1207,58 @@ export default function OrdersTab({
                         {detail.order.customerPhone || 'N/A'}
                       </a>
                     </div>
-                    <div className="flex justify-between items-center">
+                    <div className="flex justify-between items-center flex-wrap gap-2 pt-1 border-t border-slate-800/80">
                       <span className="text-slate-400 text-xs">Dining Table</span>
-                      <span className="text-amber-300 font-semibold px-2 py-0.5 rounded bg-slate-900 text-xs">
-                        {detail.order.tableLabel ? formatTableDisplay(detail.order.tableLabel) : 'Counter'}
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap justify-end">
+                        <span className="text-amber-300 font-semibold px-2 py-0.5 rounded bg-slate-900 text-xs">
+                          {detail.order.tableLabel ? formatTableDisplay(detail.order.tableLabel) : 'Counter'}
+                        </span>
+                        {(() => {
+                          const table = tables.find(
+                            (t) => t.id === detail.order.tableId || t.label === detail.order.tableLabel
+                          )
+                          if (!table) return null
+                          const isCleaning = table.state === 'cleaning'
+                          const isOccupied = table.state === 'occupied'
+                          return (
+                            <div className="flex items-center gap-1">
+                              <span
+                                className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                                  isOccupied
+                                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
+                                    : isCleaning
+                                    ? 'bg-sky-500/20 text-sky-400 border border-sky-500/40'
+                                    : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
+                                }`}
+                              >
+                                {isOccupied ? 'Occupied' : isCleaning ? 'Cleaning' : 'Available'}
+                              </span>
+                              <div className="flex items-center gap-1 ml-1">
+                                {!isCleaning && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateTableState(table.id, 'cleaning')}
+                                    className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-sky-500/15 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 transition-all cursor-pointer"
+                                    title="Mark table for cleaning"
+                                  >
+                                    🧹 Set Cleaning
+                                  </button>
+                                )}
+                                {table.state !== 'available' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateTableState(table.id, 'available')}
+                                    className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 transition-all cursor-pointer"
+                                    title="Mark table as available"
+                                  >
+                                    🟢 Free Table
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          )
+                        })()}
+                      </div>
                     </div>
                     <div className="flex justify-between items-center">
                       <span className="text-slate-400 text-xs">Ordered At</span>

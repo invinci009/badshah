@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getOrders, getActiveOrders, getOrdersByFulfilment, getTables, normalizeTableLabel, type FulfilmentStatus, type Order } from '@/lib/firebase/ordering'
+import { getOrders, getActiveOrders, getOrdersByFulfilment, getTables, normalizeTableLabel, getActiveOrdersEtag, computeOrdersEtag, type FulfilmentStatus, type Order } from '@/lib/firebase/ordering'
 import { getSessionFromRequest } from '@/lib/firebase/auth'
+
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
 // GET /api/business/orders?status=&payment=&tableId=&q=&limit=
 // Server-side filtered list (no phone leakage concern — admin only).
@@ -14,6 +17,21 @@ export async function GET(request: NextRequest) {
     const tableId = searchParams.get('tableId')
     const q = (searchParams.get('q') || '').toLowerCase().trim()
     const limit = Math.min(500, Math.max(1, parseInt(searchParams.get('limit') || '60', 10) || 60))
+
+    // Fast path: if requesting default active orders without custom filters, check cached ETag
+    if ((!status || status === 'active') && (!payment || payment === 'all') && (!tableId || tableId === 'all') && !q) {
+      const cachedEtag = getActiveOrdersEtag()
+      const ifNoneMatch = request.headers.get('if-none-match')
+      if (cachedEtag && ifNoneMatch === cachedEtag) {
+        return new NextResponse(null, {
+          status: 304,
+          headers: {
+            ETag: cachedEtag,
+            'Cache-Control': 'no-cache',
+          },
+        })
+      }
+    }
 
     let orders: Order[] = []
     if (status === 'active') {
@@ -44,10 +62,9 @@ export async function GET(request: NextRequest) {
           (o.tableLabel || '').toLowerCase().includes(q)
       )
     }
-    // Compute lightweight ETag based on order count and the latest order timestamp
-    const latestTimestamp = orders[0]?.updatedAt || orders[0]?.createdAt || '0'
-    const latestId = orders[0]?.id || '0'
-    const etag = `W/"${orders.length}-${latestId}-${latestTimestamp}"`
+
+    // Compute composite ETag so ANY status change across any order invalidates the cache immediately
+    const etag = computeOrdersEtag(orders)
 
     const ifNoneMatch = request.headers.get('if-none-match')
     if (ifNoneMatch && ifNoneMatch === etag) {
@@ -55,7 +72,7 @@ export async function GET(request: NextRequest) {
         status: 304,
         headers: {
           ETag: etag,
-          'Cache-Control': 'private, no-cache',
+          'Cache-Control': 'no-cache',
         },
       })
     }
@@ -86,7 +103,7 @@ export async function GET(request: NextRequest) {
         status: 200,
         headers: {
           ETag: etag,
-          'Cache-Control': 'private, no-cache',
+          'Cache-Control': 'no-cache',
         },
       }
     )

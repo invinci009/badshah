@@ -14,6 +14,7 @@ import {
   Smartphone,
   CheckCircle2,
   Share2,
+  Gift,
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePwa } from '@/components/pwa/PwaProvider'
@@ -165,6 +166,29 @@ export default function MobileMenuDrawer({
                 </span>
                 <span className="text-[10px] text-slate-400">
                   {menuItemsCount} active dishes configured
+                </span>
+              </div>
+            </div>
+            <span className="text-xs text-slate-500 group-hover:text-amber-400 font-semibold">
+              Manage &rarr;
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleTabClick('loyalty')}
+            className="w-full flex items-center justify-between p-3 rounded-2xl bg-slate-950/70 hover:bg-slate-800/80 border border-slate-800/80 text-left transition-colors cursor-pointer group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center">
+                <Gift className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-slate-200 group-hover:text-white block">
+                  Loyalty &amp; Rewards
+                </span>
+                <span className="text-[10px] text-slate-400">
+                  Rules, rewards, member balances &amp; analytics
                 </span>
               </div>
             </div>

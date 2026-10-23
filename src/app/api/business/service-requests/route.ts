@@ -9,7 +9,19 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status') || undefined
-    return NextResponse.json(await getServiceRequests(status, 200), { status: 200 })
+    const requests = await getServiceRequests(status, 200)
+    const latest = requests[0]?.updatedAt || requests[0]?.createdAt || '0'
+    const etag = `W/"sr-${requests.length}-${requests[0]?.id || '0'}-${latest}"`
+    if (request.headers.get('if-none-match') === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: { ETag: etag, 'Cache-Control': 'no-cache' },
+      })
+    }
+    return NextResponse.json(requests, {
+      status: 200,
+      headers: { ETag: etag, 'Cache-Control': 'no-cache' },
+    })
   } catch (error) {
     console.error('Service requests GET error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

@@ -44,113 +44,112 @@ function ageMin(createdAt: string) {
 }
 
 export default function KitchenTab() {
-  const { isVoiceEnabled, toggleVoice, announceOrderDirectly, refreshActiveOrders } = useOrderAnnouncer()
+  const { isVoiceEnabled, toggleVoice, activeOrders, refreshActiveOrders } = useOrderAnnouncer()
   const [orders, setOrders] = useState<KOrder[]>([])
   const [details, setDetails] = useState<Map<string, KDetail>>(new Map())
   const detailsRef = useRef<Map<string, KDetail>>(new Map())
   const [requests, setRequests] = useState<StaffCall[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const prevCount = useRef(0)
-  const ordersEtagRef = useRef<string | null>(null)
+  const serviceEtagRef = useRef<string | null>(null)
 
-  const load = useCallback(async () => {
-    try {
-      const headers: Record<string, string> = { 'Cache-Control': 'no-cache' }
-      if (ordersEtagRef.current) {
-        headers['If-None-Match'] = ordersEtagRef.current
+  // 1. Sync active orders and details directly from centralized active orders state
+  useEffect(() => {
+    if (!activeOrders) return
+    const active: KOrder[] = activeOrders
+      .filter((o) => ['RECEIVED', 'ACCEPTED', 'PREPARING'].includes(o.fulfilment))
+      .map((o) => ({
+        id: o.id,
+        orderNumber: o.orderNumber,
+        tableLabel: o.tableLabel || null,
+        customerName: o.customerName || 'Guest',
+        itemCount: o.itemCount || (o.items?.reduce((s, i) => s + i.quantity, 0) ?? 0),
+        fulfilment: o.fulfilment,
+        notes: o.notes,
+        createdAt: o.createdAt || new Date().toISOString(),
+        items: o.items,
+      }))
+
+    setOrders(active)
+    setError(null)
+
+    for (const o of active) {
+      if (o.items) {
+        detailsRef.current.set(o.id, {
+          order: {
+            id: o.id,
+            orderNumber: o.orderNumber,
+            items: o.items,
+            notes: o.notes,
+            customerName: o.customerName,
+            tableLabel: o.tableLabel,
+            fulfilment: o.fulfilment,
+            createdAt: o.createdAt,
+          },
+        })
       }
+    }
+    setDetails(new Map(detailsRef.current))
+  }, [activeOrders])
 
-      const [oRes, sRes] = await Promise.all([
-        fetch('/api/business/orders?status=active&limit=30', { headers }),
-        fetch('/api/business/service-requests?status=OPEN'),
-      ])
-      if (oRes.status === 401 || sRes.status === 401) {
+  // 2. Poll open service requests (waiter calls) with ETag caching
+  const loadServiceRequests = useCallback(async () => {
+    try {
+      const sHeaders: Record<string, string> = { 'Cache-Control': 'no-cache' }
+      if (serviceEtagRef.current) sHeaders['If-None-Match'] = serviceEtagRef.current
+
+      const sRes = await fetch(`/api/business/service-requests?status=OPEN`, {
+        headers: sHeaders,
+      })
+      if (sRes.status === 401) {
         window.location.href = '/login'
         return
       }
-
-      if (oRes.status !== 304 && oRes.ok) {
-        const newEtag = oRes.headers.get('ETag')
-        if (newEtag) ordersEtagRef.current = newEtag
-
-        const oData = await oRes.json()
-        if (Array.isArray(oData)) {
-          const active = oData.filter((o: KOrder) => ['RECEIVED', 'ACCEPTED', 'PREPARING'].includes(o.fulfilment))
-          const receivedOrders = active.filter((o: KOrder) => o.fulfilment === 'RECEIVED')
-
-          // Announce incoming orders automatically via Hindi voice
-          if (prevCount.current > 0) {
-            receivedOrders.forEach((o) => {
-              announceOrderDirectly({
-                id: o.id,
-                orderNumber: o.orderNumber,
-                tableLabel: o.tableLabel,
-                fulfilment: o.fulfilment,
-              })
-            })
-          }
-          prevCount.current = receivedOrders.length
-          setOrders(active)
-          setError(null)
-          // Order rows now include items directly — zero extra N+1 reads
-          for (const o of active) {
-            if (o.items) {
-              detailsRef.current.set(o.id, {
-                order: {
-                  id: o.id,
-                  orderNumber: o.orderNumber,
-                  items: o.items,
-                  notes: o.notes,
-                  customerName: o.customerName,
-                  tableLabel: o.tableLabel,
-                  fulfilment: o.fulfilment,
-                  createdAt: o.createdAt,
-                },
-              })
-            }
-          }
-          setDetails(new Map(detailsRef.current))
-        }
+      if (sRes.status === 304) {
+        return
       }
-
       if (sRes.ok) {
+        const newSEtag = sRes.headers.get('ETag')
+        if (newSEtag) serviceEtagRef.current = newSEtag
         const sData = await sRes.json()
         if (Array.isArray(sData)) setRequests(sData)
       }
     } catch {
-      setError('Failed to load kitchen data — retrying…')
+      // Non-critical background network retry
     }
-  }, [announceOrderDirectly])
+  }, [])
 
   useEffect(() => {
-    load()
+    loadServiceRequests()
 
-    // 10-second auto-sync interval
-    const t = setInterval(() => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        load()
-      }
-    }, 10000)
+    // 5-second interval for service requests
+    const t = setInterval(loadServiceRequests, 5000)
 
-    // Immediate sync when tab gains visibility or focus
+    // Immediate sync when tab gains visibility, window focus, or network reconnects
     const onVis = () => {
-      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        load()
-      }
+      loadServiceRequests()
+      refreshActiveOrders()
     }
     document.addEventListener('visibilitychange', onVis)
     window.addEventListener('focus', onVis)
+    window.addEventListener('online', onVis)
 
     return () => {
       clearInterval(t)
       document.removeEventListener('visibilitychange', onVis)
       window.removeEventListener('focus', onVis)
+      window.removeEventListener('online', onVis)
     }
-  }, [load])
+  }, [loadServiceRequests, refreshActiveOrders])
 
   const advance = async (id: string, to: string) => {
     setBusy(id)
+    // Instant optimistic update
+    setOrders((prev) =>
+      prev
+        .map((o) => (o.id === id ? { ...o, fulfilment: to } : o))
+        .filter((o) => ['RECEIVED', 'ACCEPTED', 'PREPARING'].includes(o.fulfilment))
+    )
     try {
       const res = await fetch(`/api/business/orders/${id}/status`, {
         method: 'PATCH',
@@ -160,14 +159,15 @@ export default function KitchenTab() {
       const data = await res.json().catch(() => ({}))
       if (!res.ok) {
         window.alert(data.error || 'Failed to update order status')
+        await refreshActiveOrders()
         return
       }
       detailsRef.current.delete(id)
       setDetails(new Map(detailsRef.current))
-      load()
-      refreshActiveOrders()
+      await refreshActiveOrders()
     } catch (e) {
       window.alert(e instanceof Error ? e.message : 'Failed to update order status')
+      await refreshActiveOrders()
     } finally {
       setBusy(null)
     }
@@ -180,7 +180,7 @@ export default function KitchenTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, status }),
       })
-      load()
+      loadServiceRequests()
     } catch {
       alert('Failed to update request')
     }
