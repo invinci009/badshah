@@ -9,10 +9,6 @@ import com.getcapacitor.BridgeActivity;
 import java.util.Locale;
 
 public class MainActivity extends BridgeActivity {
-    private TextToSpeech tts;
-    private volatile boolean ttsReady = false;
-    private String pendingSpeech = null;
-
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -20,21 +16,9 @@ public class MainActivity extends BridgeActivity {
         // Prevent screen from sleeping while on counter (kitchen display mode)
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
 
-        // Initialize Android Native Text-to-Speech (Google TTS engine)
-        tts = new TextToSpeech(this, status -> {
-            if (status == TextToSpeech.SUCCESS) {
-                int result = tts.setLanguage(new Locale("hi", "IN"));
-                if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                    // Fallback to Indian English or system default if Hindi voice pack not installed
-                    tts.setLanguage(new Locale("en", "IN"));
-                }
-                ttsReady = true;
-                if (pendingSpeech != null) {
-                    speakNative(pendingSpeech);
-                    pendingSpeech = null;
-                }
-            }
-        });
+        // Connect application context & pre-warm native Text-to-Speech engine
+        OrderBackgroundService.setAppContext(this);
+        OrderBackgroundService.initTTS(this);
 
         // Start foreground background service to keep orders active in background
         try {
@@ -94,24 +78,9 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    private void speakNative(String text) {
-        try {
-            if (tts != null) {
-                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "order_announcement_" + System.currentTimeMillis());
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
     @Override
     public void onDestroy() {
-        if (tts != null) {
-            try {
-                tts.stop();
-                tts.shutdown();
-            } catch (Exception ignored) {}
-        }
+        // Note: Do not shutdown OrderBackgroundService TTS here as it continues running as a foreground service
         super.onDestroy();
     }
 }

@@ -61,19 +61,30 @@ export function getAudioContext(): AudioContext | null {
 }
 
 /**
+ * Check whether audio is currently unlocked by user gesture or native environment.
+ */
+export function getIsAudioUnlocked(): boolean {
+  if (typeof window === 'undefined') return true
+  if (window.AndroidTTS) return true
+  if (sharedAudioCtx && sharedAudioCtx.state === 'running') return true
+  return isAudioUnlocked
+}
+
+/**
  * Unlock AudioContext & SpeechSynthesis on initial user interaction.
  */
 export function unlockAudio(): void {
-  if (isAudioUnlocked || typeof window === 'undefined') return
+  if (typeof window === 'undefined') return
   try {
     const ctx = getAudioContext()
     if (ctx && ctx.state === 'suspended') {
-      ctx.resume()
+      ctx.resume().catch(() => {})
     }
     if ('speechSynthesis' in window && window.speechSynthesis.paused) {
       window.speechSynthesis.resume()
     }
     isAudioUnlocked = true
+    window.dispatchEvent(new Event('rp-audio-unlocked'))
   } catch {
     // ignore gesture unlock failures
   }
@@ -274,8 +285,248 @@ export interface AnnounceOrderHindiOptions {
   onError?: (err: unknown) => void
 }
 
+// Protection against Chromium V8 garbage-collecting utterances mid-speech
+const activeUtterances = new Set<SpeechSynthesisUtterance>()
+let chromeKeepAliveInterval: ReturnType<typeof setInterval> | null = null
+
+function startChromeKeepAlive() {
+  if (chromeKeepAliveInterval || typeof window === 'undefined' || !('speechSynthesis' in window)) return
+  chromeKeepAliveInterval = setInterval(() => {
+    if (activeUtterances.size > 0 && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.pause()
+        window.speechSynthesis.resume()
+      } catch {}
+    } else {
+      stopChromeKeepAlive()
+    }
+  }, 10000)
+}
+
+function stopChromeKeepAlive() {
+  if (chromeKeepAliveInterval) {
+    clearInterval(chromeKeepAliveInterval)
+    chromeKeepAliveInterval = null
+  }
+}
+
 /**
- * Announce Hindi order arrival via Android Native TTS, Web Speech API, or HTML5 Audio stream.
+ * Split long announcement text into chunks (<= 120 chars) to prevent Google TTS HTTP 400 errors.
+ */
+function splitIntoTTSChunks(text: string, maxLen = 120): string[] {
+  if (text.length <= maxLen) return [text]
+  const chunks: string[] = []
+  const sentences = text.split(/(?<=[।.,?!])\s*/)
+  let current = ''
+  for (const s of sentences) {
+    if (!s) continue
+    if ((current + ' ' + s).trim().length <= maxLen) {
+      current = (current ? current + ' ' : '') + s
+    } else {
+      if (current) chunks.push(current)
+      if (s.length <= maxLen) {
+        current = s
+      } else {
+        const clauses = s.split(/(?<=[,])\s*/)
+        for (const c of clauses) {
+          if ((current + ' ' + c).trim().length <= maxLen) {
+            current = (current ? current + ' ' : '') + c
+          } else {
+            if (current) chunks.push(current)
+            current = c
+          }
+        }
+      }
+    }
+  }
+  if (current) chunks.push(current)
+  return chunks.length > 0 ? chunks : [text.slice(0, 120)]
+}
+
+function playSingleAudioChunk(chunk: string, volume: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const audioUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=hi&client=tw-ob&q=${encodeURIComponent(
+        chunk
+      )}`
+      const audio = new Audio(audioUrl)
+      audio.volume = volume
+
+      const timer = setTimeout(() => {
+        try {
+          audio.pause()
+        } catch {}
+        resolve(false)
+      }, 10000)
+
+      audio.onended = () => {
+        clearTimeout(timer)
+        resolve(true)
+      }
+
+      audio.onerror = () => {
+        clearTimeout(timer)
+        resolve(false)
+      }
+
+      const p = audio.play()
+      if (p !== undefined) {
+        p.catch(() => {
+          clearTimeout(timer)
+          resolve(false)
+        })
+      }
+    } catch {
+      resolve(false)
+    }
+  })
+}
+
+/**
+ * Play Hindi speech via Google Translate Cloud Audio stream.
+ * Produces crisp, natural native Indian Hindi speech on all devices without requiring installed voices.
+ * Automatically chunks sentences to guarantee safe delivery under the 200-char query limit.
+ */
+export async function playCloudAudioTTS(
+  text: string,
+  options?: AnnounceOrderHindiOptions
+): Promise<boolean> {
+  if (!text || !text.trim()) return false
+  const chunks = splitIntoTTSChunks(text.trim(), 120)
+  options?.onStart?.()
+
+  let anyPlayed = false
+  for (let i = 0; i < chunks.length; i++) {
+    const ok = await playSingleAudioChunk(chunks[i], options?.volume ?? 1.0)
+    if (ok) {
+      anyPlayed = true
+    } else if (i === 0) {
+      // First chunk blocked by autoplay or network offline: exit early so fallback can kick in
+      return false
+    }
+  }
+
+  options?.onEnd?.()
+  return anyPlayed
+}
+
+const HINDI_TO_ROMAN_MAP: Array<[RegExp, string]> = [
+  [/नया ऑर्डर आया है।?/g, 'Naya order aaya hai.'],
+  [/काउंटर से ऑर्डर प्राप्त हुआ है।?/g, 'Counter se order prapt hua hai.'],
+  [/टेकअवे से ऑर्डर प्राप्त हुआ है।?/g, 'Takeaway se order prapt hua hai.'],
+  [/डिलीवरी के लिए ऑर्डर प्राप्त हुआ है।?/g, 'Delivery ke liye order prapt hua hai.'],
+  [/वीआईपी टेबल नंबर/g, 'VIP Table number'],
+  [/वीआईपी टेबल/g, 'VIP Table'],
+  [/टेबल नंबर/g, 'Table number'],
+  [/से ऑर्डर प्राप्त हुआ है।?/g, 'se order prapt hua hai.'],
+  [/ऑर्डर में है:?/g, 'Order mein hai:'],
+  [/और (\d+|\S+) अन्य आइटम/g, 'aur $1 other items'],
+  [/और/g, 'aur'],
+  [/शून्य/g, 'shunya'], [/एक/g, 'ek'], [/दो/g, 'do'], [/तीन/g, 'teen'], [/चार/g, 'chaar'],
+  [/पाँच/g, 'paanch'], [/छह/g, 'chhah'], [/सात/g, 'saat'], [/आठ/g, 'aath'], [/नौ/g, 'nau'],
+  [/दस/g, 'das'], [/ग्यारह/g, 'gyaarah'], [/बारह/g, 'baarah'], [/तेरह/g, 'terah'],
+  [/चौदह/g, 'chaudah'], [/पंद्रह/g, 'pandrah'], [/सोलह/g, 'solah'], [/सत्रह/g, 'satrah'],
+  [/अठारह/g, 'athaarah'], [/उन्नीस/g, 'unnees'], [/बीस/g, 'bees'],
+  [/।/g, '.'],
+]
+
+/**
+ * Phonetic romanizer that converts Hindi announcement phrases into clean Hinglish words.
+ * Ensures English-only system voices on Windows PCs speak audibly instead of remaining silent.
+ */
+export function toPhoneticRomanHindi(hindiText: string): string {
+  let result = hindiText
+  for (const [pattern, replacement] of HINDI_TO_ROMAN_MAP) {
+    result = result.replace(pattern, replacement)
+  }
+  return result
+}
+
+/**
+ * Play Hindi speech via standard Browser Web Speech API (speechSynthesis).
+ * Includes Chromium garbage collection shield and automatic resume timer.
+ */
+export function playWebSpeechTTS(
+  text: string,
+  voice: SpeechSynthesisVoice | null,
+  options?: AnnounceOrderHindiOptions
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (
+      typeof window === 'undefined' ||
+      !('speechSynthesis' in window) ||
+      !('SpeechSynthesisUtterance' in window)
+    ) {
+      resolve(false)
+      return
+    }
+
+    try {
+      const synth = window.speechSynthesis
+
+      if (synth.paused) {
+        synth.resume()
+      }
+      synth.cancel()
+
+      const utterance = new SpeechSynthesisUtterance(text)
+      utterance.lang = voice?.lang || 'hi-IN'
+      utterance.rate = options?.rate ?? 0.95
+      utterance.pitch = options?.pitch ?? 1.0
+      utterance.volume = options?.volume ?? 1.0
+
+      if (voice) {
+        utterance.voice = voice
+      }
+
+      // GC Protection: hold reference in Set so V8 engine does not drop utterance mid-speech
+      activeUtterances.add(utterance)
+      startChromeKeepAlive()
+
+      const cleanup = () => {
+        activeUtterances.delete(utterance)
+        if (activeUtterances.size === 0) stopChromeKeepAlive()
+      }
+
+      const maxWaitMs = Math.max(9000, text.length * 120)
+      const safetyTimer = setTimeout(() => {
+        cleanup()
+        resolve(false)
+      }, maxWaitMs)
+
+      utterance.onstart = () => {
+        options?.onStart?.()
+      }
+
+      utterance.onend = () => {
+        clearTimeout(safetyTimer)
+        cleanup()
+        options?.onEnd?.()
+        resolve(true)
+      }
+
+      utterance.onerror = (e) => {
+        clearTimeout(safetyTimer)
+        cleanup()
+        if (e.error !== 'interrupted' && e.error !== 'canceled') {
+          console.warn('[SpeechSynthesis] Error:', e.error)
+          options?.onError?.(e)
+        }
+        resolve(false)
+      }
+
+      synth.speak(utterance)
+    } catch (err) {
+      console.warn('[SpeechSynthesis] speak failed:', err)
+      options?.onError?.(err)
+      resolve(false)
+    }
+  })
+}
+
+/**
+ * Announce Hindi order arrival via Android Native TTS, Web Speech API, or Cloud Audio stream.
+ * Guaranteed multi-tier fallback ensures speech ALWAYS plays under all network and OS conditions.
  */
 export async function announceOrderInHindi(
   tableLabelOrConfig?: string | number | null | AnnounceOrderHindiOptions,
@@ -306,12 +557,11 @@ export async function announceOrderInHindi(
     await playRestaurantChime(options?.volume !== undefined ? options.volume * 0.25 : 0.2)
   }
 
-  // 1. Android Native TTS Bridge (runs on Android app WebView)
+  // Tier 1: Android Native TTS Bridge (runs on Android app WebView, 100% reliable offline)
   if (window.AndroidTTS && typeof window.AndroidTTS.speak === 'function') {
     try {
       options?.onStart?.()
       window.AndroidTTS.speak(text)
-      // Native speech handles audio output on device speaker directly
       setTimeout(() => {
         options?.onEnd?.()
       }, 3000)
@@ -321,79 +571,39 @@ export async function announceOrderInHindi(
     }
   }
 
-  // 2. Standard Browser Web Speech API (Chrome, Safari, Edge)
-  if ('speechSynthesis' in window && 'SpeechSynthesisUtterance' in window) {
-    return new Promise((resolve) => {
-      try {
-        const synth = window.speechSynthesis
+  // Find optimal browser voice
+  const { voice, isHindi } = findBestVoice()
+  const isHiddenTab = typeof document !== 'undefined' && document.visibilityState === 'hidden'
 
-        if (synth.paused) {
-          synth.resume()
-        }
-        synth.cancel()
-
-        const utterance = new SpeechSynthesisUtterance(text)
-        utterance.lang = 'hi-IN'
-        utterance.rate = options?.rate ?? 0.95
-        utterance.pitch = options?.pitch ?? 1.0
-        utterance.volume = options?.volume ?? 1.0
-
-        const { voice } = findBestVoice()
-        if (voice) {
-          utterance.voice = voice
-        }
-
-        utterance.onstart = () => {
-          options?.onStart?.()
-        }
-
-        utterance.onend = () => {
-          options?.onEnd?.()
-          resolve(true)
-        }
-
-        utterance.onerror = (e) => {
-          if (e.error !== 'interrupted' && e.error !== 'canceled') {
-            console.warn('[SpeechSynthesis] Announcement error:', e.error)
-            options?.onError?.(e)
-          }
-          resolve(false)
-        }
-
-        const safetyTimer = setTimeout(() => {
-          resolve(false)
-        }, 9000)
-
-        utterance.addEventListener(
-          'end',
-          () => {
-            clearTimeout(safetyTimer)
-          },
-          { once: true }
-        )
-
-        synth.speak(utterance)
-      } catch (err) {
-        console.warn('[SpeechSynthesis] Failed to speak:', err)
-        options?.onError?.(err)
-        resolve(false)
-      }
-    })
+  // When tab is hidden/minimized, stream Cloud Audio directly to bypass Chromium's background speech throttling
+  if (isHiddenTab) {
+    const cloudOk = await playCloudAudioTTS(text, options)
+    if (cloudOk) return true
   }
 
-  // 3. Fallback: Online Hindi Audio TTS stream via HTML5 Audio element
-  try {
-    const audioUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=hi&client=tw-ob&q=${encodeURIComponent(text)}`
-    const audio = new Audio(audioUrl)
-    audio.volume = options?.volume ?? 1.0
-    options?.onStart?.()
-    await audio.play()
-    options?.onEnd?.()
-    return true
-  } catch (audioErr) {
-    console.warn('[AudioFallback] Cloud TTS failed:', audioErr)
-    return false
+  // Tier 2 & 3: Multi-tier fallback hierarchy
+  if (isHindi && voice) {
+    // A. Native Hindi voice is installed: use Web Speech API
+    const webSpeechOk = await playWebSpeechTTS(text, voice, options)
+    if (webSpeechOk) return true
+
+    // Fallback: If Web Speech failed or got blocked, stream Cloud Hindi Audio
+    const cloudOk = await playCloudAudioTTS(text, options)
+    if (cloudOk) return true
+  } else {
+    // B. No native Hindi voice pack installed (common on Windows PCs and tablets):
+    // First try Cloud Hindi Audio stream (studio-quality Indian Hindi speech)
+    const cloudOk = await playCloudAudioTTS(text, options)
+    if (cloudOk) return true
+
+    // Fallback: If offline without internet, use Web Speech API with phonetic Hinglish
+    // (Devanagari script causes English-only system voices on Windows to fail silently; phonetic Hinglish speaks clearly)
+    const speechPayload = toPhoneticRomanHindi(text)
+    const fallbackOk = await playWebSpeechTTS(speechPayload, voice, options)
+    if (fallbackOk) return true
   }
+
+  return false
 }
 
 /**

@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.media.AudioAttributes;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
@@ -31,6 +32,7 @@ public class OrderBackgroundService extends Service {
     private static TextToSpeech tts;
     private static volatile boolean ttsReady = false;
     private static String pendingSpeech = null;
+    private static Context appContext = null;
 
     private static final Set<String> announcedOrderIds = Collections.synchronizedSet(new HashSet<>());
     private PowerManager.WakeLock wakeLock;
@@ -38,9 +40,16 @@ public class OrderBackgroundService extends Service {
     private boolean isFirstPoll = true;
     private String lastEtag = null;
 
+    public static void setAppContext(Context ctx) {
+        if (ctx != null) {
+            appContext = ctx.getApplicationContext();
+        }
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
+        setAppContext(this);
         createNotificationChannels();
 
         // 1. Keep CPU active so voice announcements & background poller run when screen is off
@@ -71,10 +80,25 @@ public class OrderBackgroundService extends Service {
     }
 
     public static synchronized void initTTS(Context context) {
+        if (context != null) {
+            appContext = context.getApplicationContext();
+        }
         if (tts != null && ttsReady) return;
 
-        tts = new TextToSpeech(context.getApplicationContext(), status -> {
+        Context target = context != null ? context.getApplicationContext() : appContext;
+        if (target == null) return;
+
+        tts = new TextToSpeech(target, status -> {
             if (status == TextToSpeech.SUCCESS) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    try {
+                        AudioAttributes attrs = new AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ASSISTANCE_ACCESSIBILITY)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build();
+                        tts.setAudioAttributes(attrs);
+                    } catch (Exception ignored) {}
+                }
                 int res = tts.setLanguage(new Locale("hi", "IN"));
                 if (res == TextToSpeech.LANG_MISSING_DATA || res == TextToSpeech.LANG_NOT_SUPPORTED) {
                     tts.setLanguage(new Locale("en", "IN"));
@@ -96,12 +120,24 @@ public class OrderBackgroundService extends Service {
         if (text == null || text.trim().isEmpty()) return;
         if (ttsReady && tts != null) {
             try {
-                tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "order_announcement_" + System.currentTimeMillis());
+                // QUEUE_ADD ensures multiple rapid incoming orders are spoken completely without truncation
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                    android.os.Bundle params = new android.os.Bundle();
+                    params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f);
+                    tts.speak(text, TextToSpeech.QUEUE_ADD, params, "order_announcement_" + System.currentTimeMillis());
+                } else {
+                    java.util.HashMap<String, String> params = new java.util.HashMap<>();
+                    params.put(TextToSpeech.Engine.KEY_PARAM_VOLUME, "1.0");
+                    tts.speak(text, TextToSpeech.QUEUE_ADD, params);
+                }
             } catch (Exception e) {
                 e.printStackTrace();
             }
         } else {
             pendingSpeech = text;
+            if (appContext != null) {
+                initTTS(appContext);
+            }
         }
     }
 
@@ -215,6 +251,18 @@ public class OrderBackgroundService extends Service {
         int alertNotifId = (int) (System.currentTimeMillis() % 100000) + 100;
         manager.notify(alertNotifId, notification);
 
+        // Wake screen briefly so sleeping kitchen tablet lights up and displays heads-up order popup
+        try {
+            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                PowerManager.WakeLock screenLock = pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE,
+                    "BadshahOrders:ScreenWakeAlert"
+                );
+                screenLock.acquire(8000);
+            }
+        } catch (Exception ignored) {}
+
         // Dictate items out loud via Native Android TTS
         if (speechAnnouncement != null && !speechAnnouncement.trim().isEmpty()) {
             speakAloud(speechAnnouncement);
@@ -251,6 +299,14 @@ public class OrderBackgroundService extends Service {
             if (lastEtag != null) {
                 conn.setRequestProperty("If-None-Match", lastEtag);
             }
+
+            // Forward session cookies so native background poller authenticates when WebView is sleeping
+            try {
+                String cookies = android.webkit.CookieManager.getInstance().getCookie("https://biriyani-badshah.vercel.app");
+                if (cookies != null && !cookies.trim().isEmpty()) {
+                    conn.setRequestProperty("Cookie", cookies);
+                }
+            } catch (Exception ignored) {}
 
             int responseCode = conn.getResponseCode();
             if (responseCode == 304) {

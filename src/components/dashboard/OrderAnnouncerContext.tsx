@@ -15,10 +15,13 @@ import {
   requestNotificationPermission,
   showOrderNotification,
   unlockAudio,
+  getIsAudioUnlocked,
+  playRestaurantChime,
   type VoiceEngineStatus,
 } from '@/lib/client/speechAnnouncer'
 import { formatPaise } from '@/lib/ordering/rules.mjs'
 import { getHindiTableAnnouncement } from '@/lib/ordering/hindiAnnouncement.mjs'
+import { Volume2 } from 'lucide-react'
 
 export interface IncomingOrderInfo {
   id: string
@@ -59,6 +62,7 @@ interface OrderAnnouncerContextType {
   activeOrders: IncomingOrderInfo[]
   refreshActiveOrders: () => Promise<void>
   isSyncing: boolean
+  audioUnlocked: boolean
 }
 
 const OrderAnnouncerContext = createContext<OrderAnnouncerContextType | null>(null)
@@ -102,65 +106,30 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
   const [isAnnouncing, setIsAnnouncing] = useState(false)
   const [lastAnnouncement, setLastAnnouncement] = useState<string | null>(null)
   const [activeArrival, setActiveArrival] = useState<IncomingOrderInfo | null>(null)
+  const [audioUnlocked, setAudioUnlocked] = useState<boolean>(() => getIsAudioUnlocked())
 
   const knownOrderIds = useRef<Set<string>>(new Set())
   const announcedOrderIds = useRef<Set<string>>(new Set())
   const isInitialFetch = useRef<boolean>(true)
   const dismissTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const etagRef = useRef<string | null>(null)
+  const pendingBlockedOrderRef = useRef<IncomingOrderInfo | null>(null)
 
-  // Listen for speech synthesis voices and Android native TTS bridge
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const updateEngine = () => {
-      setEngineStatus(getVoiceEngineStatus())
-    }
+  // Sequential Announcement Queue to prevent speech collisions
+  const queueRef = useRef<IncomingOrderInfo[]>([])
+  const isDrainingRef = useRef<boolean>(false)
 
-    updateEngine()
+  // Process order announcements sequentially through the FIFO queue
+  const drainAnnouncementQueue = useCallback(async () => {
+    if (isDrainingRef.current) return
+    isDrainingRef.current = true
 
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.addEventListener('voiceschanged', updateEngine)
-    }
-
-    // Re-check after 500ms to catch Android JavascriptInterface injection
-    const timer = setTimeout(updateEngine, 500)
-
-    return () => {
-      clearTimeout(timer)
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.removeEventListener('voiceschanged', updateEngine)
-      }
-    }
-  }, [])
-
-  const toggleVoice = useCallback((forced?: boolean) => {
-    unlockAudio()
-    const current = getVoiceSnapshot()
-    const next = forced !== undefined ? forced : !current
-    try {
-      localStorage.setItem(STORAGE_KEY, String(next))
-    } catch {
-      /* storage full or private mode */
-    }
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new Event('rp-voice-toggle'))
-    }
-  }, [])
-
-  const requestNotifications = useCallback(async () => {
-    unlockAudio()
-    const result = await requestNotificationPermission()
-    setEngineStatus((prev) => ({ ...prev, notificationPermission: result }))
-  }, [])
-
-  // Core trigger to announce an order with Chime + Hindi Speech + Browser Notification
-  const announceOrderDirectly = useCallback(
-    async (order: IncomingOrderInfo) => {
-      if (announcedOrderIds.current.has(order.id)) return
-      announcedOrderIds.current.add(order.id)
-      knownOrderIds.current.add(order.id)
+    while (queueRef.current.length > 0) {
+      const order = queueRef.current.shift()
+      if (!order) break
 
       unlockAudio()
+      setAudioUnlocked(true)
       setActiveArrival(order)
 
       if (dismissTimeoutRef.current) {
@@ -189,29 +158,82 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
         },
       })
 
-      // 2. Hindi Audio Voice Announcement for web browsers (AndroidTTS dictates via notification)
-      if (!isVoiceEnabled || (typeof window !== 'undefined' && window.AndroidTTS)) return
+      // 2. Play Hindi voice announcement (on Android app, AndroidTTS handles it inside notification)
+      if (isVoiceEnabled && !(typeof window !== 'undefined' && window.AndroidTTS)) {
+        setIsAnnouncing(true)
+        setLastAnnouncement(order.tableLabel ? `टेबल ${order.tableLabel}` : 'काउंटर')
+        try {
+          const played = await announceOrderInHindi({
+            tableLabel: order.tableLabel,
+            items: order.items,
+            playChimeFirst: true,
+            rate: 0.95,
+            onStart: () => setIsAnnouncing(true),
+            onEnd: () => setIsAnnouncing(false),
+          })
 
-      setIsAnnouncing(true)
-      try {
-        await announceOrderInHindi({
-          tableLabel: order.tableLabel,
-          items: order.items,
-          playChimeFirst: true,
-          rate: 0.95,
-          onStart: () => {
-            setIsAnnouncing(true)
-          },
-          onEnd: () => {
-            setIsAnnouncing(false)
-          },
-        })
-      } catch {
-        setIsAnnouncing(false)
+          if (!played) {
+            // Audio was restricted or failed: keep in blocked ref and remove from announced set so user touch plays it immediately
+            pendingBlockedOrderRef.current = order
+            announcedOrderIds.current.delete(order.id)
+          } else {
+            if (pendingBlockedOrderRef.current?.id === order.id) {
+              pendingBlockedOrderRef.current = null
+            }
+          }
+        } catch {
+          pendingBlockedOrderRef.current = order
+          announcedOrderIds.current.delete(order.id)
+          setIsAnnouncing(false)
+        }
+        // Brief 400ms pause between sequential order announcements
+        await new Promise((r) => setTimeout(r, 400))
       }
+    }
+
+    isDrainingRef.current = false
+    setIsAnnouncing(false)
+  }, [isVoiceEnabled])
+
+  // Core trigger to announce an order
+  const announceOrderDirectly = useCallback(
+    async (order: IncomingOrderInfo) => {
+      if (announcedOrderIds.current.has(order.id)) return
+      announcedOrderIds.current.add(order.id)
+      knownOrderIds.current.add(order.id)
+
+      queueRef.current.push(order)
+      drainAnnouncementQueue()
     },
-    [isVoiceEnabled]
+    [drainAnnouncementQueue]
   )
+
+  // Track and react to AudioContext / browser autoplay policy unlock
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+
+    const handleUnlock = () => {
+      unlockAudio()
+      setAudioUnlocked(true)
+      if (pendingBlockedOrderRef.current) {
+        const blocked = pendingBlockedOrderRef.current
+        pendingBlockedOrderRef.current = null
+        announceOrderDirectly(blocked)
+      }
+    }
+
+    window.addEventListener('rp-audio-unlocked', handleUnlock)
+    window.addEventListener('pointerdown', handleUnlock, { passive: true })
+    window.addEventListener('keydown', handleUnlock, { passive: true })
+    window.addEventListener('touchstart', handleUnlock, { passive: true })
+
+    return () => {
+      window.removeEventListener('rp-audio-unlocked', handleUnlock)
+      window.removeEventListener('pointerdown', handleUnlock)
+      window.removeEventListener('keydown', handleUnlock)
+      window.removeEventListener('touchstart', handleUnlock)
+    }
+  }, [announceOrderDirectly])
 
   // Test button action
   const testVoice = useCallback(
@@ -220,6 +242,7 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
       items?: Array<{ itemName: string; quantity: number } | string>
     ) => {
       unlockAudio()
+      setAudioUnlocked(true)
       setIsAnnouncing(true)
       setLastAnnouncement(`टेबल नंबर ${tableLabel}`)
 
@@ -255,11 +278,10 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
     []
   )
 
-  // Real-time Background Order Poller (pauses when dashboard tab is hidden/minimized)
-  const pollActiveOrders = useCallback(async (force = false) => {
-    if (!force && typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-      return
-    }
+  // Real-time Background Order Poller
+  // Continues monitoring in background so voice alerts never fail when tab is hidden.
+  // Zero Firestore read overhead when orders are unchanged (ETag 304).
+  const pollActiveOrders = useCallback(async () => {
     try {
       setIsSyncing(true)
       const headers: Record<string, string> = { 'Cache-Control': 'no-cache' }
@@ -271,7 +293,7 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
         headers,
       })
 
-      // 304 Not Modified: zero changes, zero memory churn, instant exit!
+      // 304 Not Modified: zero Firestore reads, zero churn, instant exit!
       if (res.status === 304) {
         setIsSyncing(false)
         return
@@ -312,10 +334,10 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
       // Update known IDs
       currentIds.forEach((id) => knownOrderIds.current.add(id))
 
-      // Announce each fresh order sequentially
+      // Queue each fresh order for sequential speech announcement
       if (freshOrders.length > 0) {
         for (const fresh of freshOrders) {
-          await announceOrderDirectly({
+          announceOrderDirectly({
             id: fresh.id,
             orderNumber: fresh.orderNumber,
             tableLabel: fresh.tableLabel,
@@ -327,7 +349,7 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
         }
       }
     } catch {
-      // network glitch, retries on next tick
+      // network retry on next tick
     } finally {
       setIsSyncing(false)
     }
@@ -338,28 +360,42 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
   }, [pollActiveOrders])
 
   useEffect(() => {
-    pollActiveOrders(true)
+    pollActiveOrders()
 
-    // Poll every 6 seconds while dashboard tab is active and visible
-    const interval = setInterval(() => {
-      pollActiveOrders()
-    }, 6000)
+    // Dynamic poller: 5s when visible, 8s when hidden/backgrounded
+    let timer: NodeJS.Timeout
+    let active = true
 
-    // Immediate sync when tab gains visibility, window focus, or network reconnects
+    const scheduleNext = () => {
+      if (!active) return
+      const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'
+      const delayMs = isHidden ? 8000 : 5000
+      timer = setTimeout(async () => {
+        await pollActiveOrders()
+        scheduleNext()
+      }, delayMs)
+    }
+
+    scheduleNext()
+
+    // Immediate poll when window regains focus, becomes visible, or reconnects
     const onVisible = () => {
-      pollActiveOrders(true)
+      pollActiveOrders()
     }
     document.addEventListener('visibilitychange', onVisible)
     window.addEventListener('focus', onVisible)
     window.addEventListener('online', onVisible)
 
     return () => {
-      clearInterval(interval)
+      active = false
+      clearTimeout(timer)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
       window.removeEventListener('online', onVisible)
     }
   }, [pollActiveOrders])
+
+  const hasAndroid = typeof window !== 'undefined' && !!window.AndroidTTS
 
   return (
     <OrderAnnouncerContext.Provider
@@ -376,8 +412,54 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
         activeOrders,
         refreshActiveOrders,
         isSyncing,
+        audioUnlocked,
       }}
     >
+      {/* Floating Audio Unlock Banner: Dismisses immediately on click or anywhere-tap */}
+      {!audioUnlocked && !hasAndroid && isVoiceEnabled && (
+        <div
+          onClick={() => {
+            unlockAudio()
+            setAudioUnlocked(true)
+            playRestaurantChime(0.2)
+            if (pendingBlockedOrderRef.current) {
+              const blocked = pendingBlockedOrderRef.current
+              pendingBlockedOrderRef.current = null
+              announceOrderDirectly(blocked)
+            }
+          }}
+          className="fixed top-3 left-1/2 -translate-x-1/2 z-50 max-w-md w-[92%] bg-gradient-to-r from-amber-950/95 via-slate-900/95 to-amber-950/95 border border-amber-500/50 shadow-2xl shadow-black/80 rounded-2xl p-3 text-white flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-3 duration-300 cursor-pointer backdrop-blur"
+          role="alert"
+          title="Click to enable voice alerts"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-400 flex items-center justify-center shrink-0 animate-pulse">
+              <Volume2 className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xs font-bold text-slate-100 truncate">Audio is paused by browser</p>
+              <p className="text-[10px] text-amber-300/80">Tap anywhere to enable live Hindi voice alerts</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              unlockAudio()
+              setAudioUnlocked(true)
+              playRestaurantChime(0.2)
+              if (pendingBlockedOrderRef.current) {
+                const blocked = pendingBlockedOrderRef.current
+                pendingBlockedOrderRef.current = null
+                announceOrderDirectly(blocked)
+              }
+            }}
+            className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black shrink-0 transition-transform active:scale-95 cursor-pointer shadow-md"
+          >
+            Enable Sound
+          </button>
+        </div>
+      )}
       {children}
     </OrderAnnouncerContext.Provider>
   )
