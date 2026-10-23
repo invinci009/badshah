@@ -235,6 +235,52 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
     }
   }, [announceOrderDirectly])
 
+  // Listen for speech synthesis voices and Android native TTS bridge
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const updateEngine = () => {
+      setEngineStatus(getVoiceEngineStatus())
+      setAudioUnlocked(getIsAudioUnlocked())
+    }
+
+    updateEngine()
+
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.addEventListener('voiceschanged', updateEngine)
+    }
+
+    const timer = setTimeout(updateEngine, 500)
+
+    return () => {
+      clearTimeout(timer)
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.removeEventListener('voiceschanged', updateEngine)
+      }
+    }
+  }, [])
+
+  const toggleVoice = useCallback((forced?: boolean) => {
+    unlockAudio()
+    setAudioUnlocked(true)
+    const current = getVoiceSnapshot()
+    const next = forced !== undefined ? forced : !current
+    try {
+      localStorage.setItem(STORAGE_KEY, String(next))
+    } catch {
+      /* storage full or private mode */
+    }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('rp-voice-toggle'))
+    }
+  }, [])
+
+  const requestNotifications = useCallback(async () => {
+    unlockAudio()
+    setAudioUnlocked(true)
+    const result = await requestNotificationPermission()
+    setEngineStatus((prev) => ({ ...prev, notificationPermission: result }))
+  }, [])
+
   // Test button action
   const testVoice = useCallback(
     async (
