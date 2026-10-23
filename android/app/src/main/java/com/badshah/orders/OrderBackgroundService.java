@@ -35,10 +35,13 @@ public class OrderBackgroundService extends Service {
     private static Context appContext = null;
 
     private static final Set<String> announcedOrderIds = Collections.synchronizedSet(new HashSet<>());
+    private static final Set<String> announcedServiceRequestIds = Collections.synchronizedSet(new HashSet<>());
     private PowerManager.WakeLock wakeLock;
     private volatile boolean isRunning = false;
     private boolean isFirstPoll = true;
     private String lastEtag = null;
+    private boolean isFirstServicePoll = true;
+    private String lastServiceEtag = null;
 
     public static void setAppContext(Context ctx) {
         if (ctx != null) {
@@ -270,7 +273,98 @@ public class OrderBackgroundService extends Service {
     }
 
     /**
-     * Native background poller that checks active orders directly via HTTP when WebView is sleeping.
+     * Post a high-priority Heads-Up Notification for customer staff requests (water, bill, assistance).
+     */
+    public static void postServiceAlert(Context context, String requestId, String tableLabel, String serviceType, String note, String speechAnnouncement) {
+        if (context == null) return;
+        if (requestId != null && !requestId.isEmpty()) {
+            announcedServiceRequestIds.add(requestId);
+        }
+
+        NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+        if (manager == null) return;
+
+        Intent notificationIntent = new Intent(context, MainActivity.class);
+        notificationIntent.setAction(Intent.ACTION_MAIN);
+        notificationIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+        notificationIntent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+
+        PendingIntent pendingIntent = PendingIntent.getActivity(
+            context,
+            (int) System.currentTimeMillis(),
+            notificationIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
+        );
+
+        String displayTable = (tableLabel != null && !tableLabel.trim().isEmpty()) ? tableLabel : "काउंटर";
+        String serviceHindiLabel;
+        String emoji;
+
+        if ("water".equalsIgnoreCase(serviceType)) {
+            serviceHindiLabel = "पीने का पानी";
+            emoji = "💧";
+        } else if ("bill".equalsIgnoreCase(serviceType)) {
+            serviceHindiLabel = "बिल रिक्वेस्ट";
+            emoji = "💵";
+        } else if ("cleaning".equalsIgnoreCase(serviceType)) {
+            serviceHindiLabel = "टेबल सफाई";
+            emoji = "🧹";
+        } else if ("other".equalsIgnoreCase(serviceType)) {
+            serviceHindiLabel = "कटलरी / प्लेट्स";
+            emoji = "🍴";
+        } else {
+            serviceHindiLabel = "वेटर कॉल (सहायता)";
+            emoji = "🛎️";
+        }
+
+        String title = "🔔 " + emoji + " सर्विस अलर्ट: टेबल " + displayTable + " (" + serviceHindiLabel + ")";
+        String contentText = "टेबल " + displayTable + " से " + serviceHindiLabel + " के लिए अनुरोध प्राप्त हुआ है।";
+        if (note != null && !note.trim().isEmpty()) {
+            contentText += " नोट: " + note.trim();
+        }
+
+        NotificationCompat.BigTextStyle bigStyle = new NotificationCompat.BigTextStyle()
+            .setBigContentTitle(title)
+            .setSummaryText("स्टाफ सहायता")
+            .bigText("📍 टेबल: " + displayTable + "\n" +
+                     emoji + " सेवा: " + serviceHindiLabel + "\n" +
+                     (note != null && !note.trim().isEmpty() ? "📝 नोट: " + note.trim() + "\n" : "") +
+                     "डैशबोर्ड खोलने के लिए टैप करें");
+
+        Notification notification = new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
+            .setContentTitle(title)
+            .setContentText(contentText)
+            .setStyle(bigStyle)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setDefaults(Notification.DEFAULT_ALL)
+            .setAutoCancel(true)
+            .setContentIntent(pendingIntent)
+            .build();
+
+        int alertNotifId = (int) (System.currentTimeMillis() % 100000) + 200;
+        manager.notify(alertNotifId, notification);
+
+        // Wake screen briefly so sleeping kitchen tablet lights up and displays heads-up service popup
+        try {
+            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                PowerManager.WakeLock screenLock = pm.newWakeLock(
+                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE,
+                    "BadshahOrders:ScreenWakeAlert"
+                );
+                screenLock.acquire(8000);
+            }
+        } catch (Exception ignored) {}
+
+        // Dictate service alert out loud via Native Android TTS
+        if (speechAnnouncement != null && !speechAnnouncement.trim().isEmpty()) {
+            speakAloud(speechAnnouncement);
+        }
+    }
+
+    /**
+     * Native background poller that checks active orders and staff requests directly via HTTP when WebView is sleeping.
      */
     private void startBackgroundPoller() {
         new Thread(() -> {
@@ -279,6 +373,7 @@ public class OrderBackgroundService extends Service {
                     Thread.sleep(8000);
                     if (!isRunning) break;
                     pollOrdersNative();
+                    pollServiceRequestsNative();
                 } catch (InterruptedException e) {
                     break;
                 } catch (Exception e) {
@@ -389,6 +484,107 @@ public class OrderBackgroundService extends Service {
                             orderNumber,
                             tableLabel,
                             itemsSummary.toString(),
+                            speechText
+                        );
+                    }
+                }
+            }
+            conn.disconnect();
+        } catch (Exception ignored) {
+            // will retry automatically on next tick
+        }
+    }
+
+    private void pollServiceRequestsNative() {
+        try {
+            URL url = new URL("https://biriyani-badshah.vercel.app/api/business/service-requests?status=OPEN");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setConnectTimeout(6000);
+            conn.setReadTimeout(6000);
+            conn.setRequestProperty("Cache-Control", "no-cache");
+            if (lastServiceEtag != null) {
+                conn.setRequestProperty("If-None-Match", lastServiceEtag);
+            }
+
+            try {
+                String cookies = android.webkit.CookieManager.getInstance().getCookie("https://biriyani-badshah.vercel.app");
+                if (cookies != null && !cookies.trim().isEmpty()) {
+                    conn.setRequestProperty("Cookie", cookies);
+                }
+            } catch (Exception ignored) {}
+
+            int responseCode = conn.getResponseCode();
+            if (responseCode == 304) {
+                conn.disconnect();
+                return;
+            }
+
+            if (responseCode == 200) {
+                String newEtag = conn.getHeaderField("ETag");
+                if (newEtag != null) {
+                    lastServiceEtag = newEtag;
+                }
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    sb.append(line);
+                }
+                reader.close();
+
+                JSONArray requests = new JSONArray(sb.toString());
+
+                // Seed existing requests on first tick to avoid announcing historical calls
+                if (isFirstServicePoll) {
+                    for (int i = 0; i < requests.length(); i++) {
+                        JSONObject r = requests.getJSONObject(i);
+                        announcedServiceRequestIds.add(r.optString("id", ""));
+                    }
+                    isFirstServicePoll = false;
+                    conn.disconnect();
+                    return;
+                }
+
+                for (int i = 0; i < requests.length(); i++) {
+                    JSONObject req = requests.getJSONObject(i);
+                    String id = req.optString("id", "");
+                    String status = req.optString("status", "OPEN");
+
+                    if ("OPEN".equalsIgnoreCase(status) && !id.isEmpty() && !announcedServiceRequestIds.contains(id)) {
+                        announcedServiceRequestIds.add(id);
+
+                        String tableLabel = req.optString("tableLabel", "काउंटर");
+                        if (tableLabel.isEmpty() || "null".equalsIgnoreCase(tableLabel)) {
+                            tableLabel = "काउंटर";
+                        }
+                        String type = req.optString("type", "assistance");
+                        String note = req.optString("note", "");
+
+                        String servicePhraseHindi;
+                        if ("water".equalsIgnoreCase(type)) {
+                            servicePhraseHindi = "पीने का पानी मांगा गया है।";
+                        } else if ("bill".equalsIgnoreCase(type)) {
+                            servicePhraseHindi = "बिल मांगा गया है।";
+                        } else if ("cleaning".equalsIgnoreCase(type)) {
+                            servicePhraseHindi = "टेबल साफ करने के लिए बुलाया गया है।";
+                        } else if ("other".equalsIgnoreCase(type)) {
+                            servicePhraseHindi = "चम्मच और प्लेट मांगी गई है।";
+                        } else {
+                            servicePhraseHindi = "वेटर को बुलाया गया है।";
+                        }
+
+                        String speechText = "सर्विस अलर्ट! टेबल " + tableLabel + " से " + servicePhraseHindi;
+                        if (!note.isEmpty() && !"null".equalsIgnoreCase(note)) {
+                            speechText += " नोट: " + note + "।";
+                        }
+
+                        postServiceAlert(
+                            getApplicationContext(),
+                            id,
+                            tableLabel,
+                            type,
+                            note,
                             speechText
                         );
                     }

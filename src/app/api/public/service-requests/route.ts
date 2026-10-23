@@ -8,6 +8,7 @@ import {
 import { hashToken } from '@/lib/ordering/tokens'
 import { serviceRequestSchema } from '@/lib/ordering/validation'
 import { getCampaignBySlug } from '@/lib/firebase/firestore'
+import { sendMobileServiceAlarm } from '@/lib/server/pushNotifier'
 
 // POST /api/public/service-requests — customer calls staff (water/bill/etc).
 // Supports table token or verified table label.
@@ -59,6 +60,14 @@ export async function POST(request: NextRequest) {
       type: parsed.data.type,
       note: parsed.data.note,
     })
+
+    // Trigger instant mobile push alarm on admin/staff phones
+    sendMobileServiceAlarm({
+      tableLabel,
+      type: parsed.data.type,
+      note: parsed.data.note,
+    }).catch(() => {})
+
     return NextResponse.json({ id: req.id, status: req.status }, { status: 201 })
   } catch (error) {
     console.error('Service request error:', error)

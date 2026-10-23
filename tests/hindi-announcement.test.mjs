@@ -4,6 +4,8 @@ import {
   numberToHindiWords,
   getHindiTableAnnouncement,
   formatHindiOrderItems,
+  getHindiServiceAnnouncement,
+  getTableLocationPhrase,
 } from '../src/lib/ordering/hindiAnnouncement.mjs'
 
 describe('Hindi Number Conversion', () => {
@@ -274,6 +276,69 @@ describe('Specific Order Items Hindi Announcement ("ye ye order hai")', () => {
     assert.equal(
       tableAnnounce,
       'नया ऑर्डर आया है। टेबल नंबर पाँच से ऑर्डर प्राप्त हुआ है। ऑर्डर में है: एक Badshah Special Creamy Kabab, और एक rasmlai।'
+    )
+  })
+})
+
+describe('Staff Service Assistance Voice Announcements (Call Staff Modal)', () => {
+  it('generates natural table location phrases', () => {
+    assert.equal(getTableLocationPhrase('14'), 'टेबल नंबर चौदह')
+    assert.equal(getTableLocationPhrase('Table 14'), 'टेबल नंबर चौदह')
+    assert.equal(getTableLocationPhrase('VIP'), 'वीआईपी टेबल')
+    assert.equal(getTableLocationPhrase('Counter'), 'Counter')
+    assert.equal(getTableLocationPhrase(''), 'काउंटर')
+    assert.equal(getTableLocationPhrase(null), 'काउंटर')
+  })
+
+  it('generates precise Hindi service announcement for Drinking Water (Table 14 from prompt image)', () => {
+    const text = getHindiServiceAnnouncement({
+      tableLabel: '14',
+      type: 'water',
+    })
+    assert.equal(text, 'सर्विस अलर्ट! टेबल नंबर चौदह से पीने का पानी मांगा गया है।')
+  })
+
+  it('generates announcement with optional customer special note', () => {
+    const text = getHindiServiceAnnouncement({
+      tableLabel: '14',
+      type: 'water',
+      note: 'Extra glasses, warm water',
+    })
+    assert.equal(
+      text,
+      'सर्विस अलर्ट! टेबल नंबर चौदह से पीने का पानी मांगा गया है। नोट: Extra glasses, warm water।'
+    )
+  })
+
+  it('handles all 5 customer modal service types', () => {
+    // 1. Water
+    assert.equal(
+      getHindiServiceAnnouncement({ tableLabel: '5', type: 'water' }),
+      'सर्विस अलर्ट! टेबल नंबर पाँच से पीने का पानी मांगा गया है।'
+    )
+
+    // 2. Waiter Call
+    assert.equal(
+      getHindiServiceAnnouncement({ tableLabel: '5', type: 'assistance' }),
+      'सर्विस अलर्ट! टेबल नंबर पाँच से वेटर को बुलाया गया है।'
+    )
+
+    // 3. Clean Table
+    assert.equal(
+      getHindiServiceAnnouncement({ tableLabel: '5', type: 'cleaning' }),
+      'सर्विस अलर्ट! टेबल नंबर पाँच से टेबल साफ करने के लिए बुलाया गया है।'
+    )
+
+    // 4. Cutlery / Plates
+    assert.equal(
+      getHindiServiceAnnouncement({ tableLabel: '5', type: 'other' }),
+      'सर्विस अलर्ट! टेबल नंबर पाँच से चम्मच और प्लेट मांगी गई है।'
+    )
+
+    // 5. Request Bill
+    assert.equal(
+      getHindiServiceAnnouncement({ tableLabel: '5', type: 'bill' }),
+      'सर्विस अलर्ट! टेबल नंबर पाँच से बिल मांगा गया है।'
     )
   })
 })

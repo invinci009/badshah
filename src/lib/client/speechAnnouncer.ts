@@ -6,7 +6,11 @@
  * Browser Notifications.
  */
 
-import { getHindiTableAnnouncement } from '../ordering/hindiAnnouncement.mjs'
+import {
+  getHindiTableAnnouncement,
+  getHindiServiceAnnouncement,
+  SERVICE_REQUEST_ENGLISH_LABELS,
+} from '../ordering/hindiAnnouncement.mjs'
 
 declare global {
   interface Window {
@@ -16,6 +20,13 @@ declare global {
         orderNumber: string,
         tableLabel: string,
         itemsSummary: string,
+        speechAnnouncement: string
+      ) => void
+      showServiceNotification?: (
+        requestId: string,
+        tableLabel: string,
+        serviceType: string,
+        note: string,
         speechAnnouncement: string
       ) => void
       isAvailable: () => boolean
@@ -422,6 +433,14 @@ const HINDI_TO_ROMAN_MAP: Array<[RegExp, string]> = [
   [/ऑर्डर में है:?/g, 'Order mein hai:'],
   [/और (\d+|\S+) अन्य आइटम/g, 'aur $1 other items'],
   [/और/g, 'aur'],
+  [/सर्विस अलर्ट!?/g, 'Service alert!'],
+  [/पीने का पानी मांगा गया है।?/g, 'drinking water manga gaya hai.'],
+  [/बिल मांगा गया है।?/g, 'bill manga gaya hai.'],
+  [/वेटर को बुलाया गया है।?/g, 'waiter ko bulaya gaya hai.'],
+  [/टेबल साफ करने के लिए बुलाया गया है।?/g, 'table saaf karne ke liye bulaya gaya hai.'],
+  [/चम्मच और प्लेट मांगी गई है।?/g, 'cutlery aur plates mangi gayi hai.'],
+  [/स्टाफ सहायता बुलाई गई है।?/g, 'staff assistance bulayi gayi hai.'],
+  [/नोट:?/g, 'Note:'],
   [/शून्य/g, 'shunya'], [/एक/g, 'ek'], [/दो/g, 'do'], [/तीन/g, 'teen'], [/चार/g, 'chaar'],
   [/पाँच/g, 'paanch'], [/छह/g, 'chhah'], [/सात/g, 'saat'], [/आठ/g, 'aath'], [/नौ/g, 'nau'],
   [/दस/g, 'das'], [/ग्यारह/g, 'gyaarah'], [/बारह/g, 'baarah'], [/तेरह/g, 'terah'],
@@ -677,6 +696,153 @@ export function showOrderNotification(params: {
       return true
     } catch (err) {
       console.warn('[Notification] Could not display browser notification:', err)
+      return false
+    }
+  }
+
+  return false
+}
+
+/**
+ * Announce customer staff assistance / service call out loud in Hindi.
+ * Guaranteed multi-tier fallback ensures staff receives the audio alert.
+ */
+export async function announceServiceRequestInHindi(params: {
+  tableLabel?: string | number | null
+  type: string
+  note?: string
+  playChimeFirst?: boolean
+  volume?: number
+  onStart?: () => void
+  onEnd?: () => void
+  onError?: (err: unknown) => void
+}): Promise<boolean> {
+  if (typeof window === 'undefined') return false
+
+  const text = getHindiServiceAnnouncement({
+    tableLabel: params.tableLabel,
+    type: params.type,
+    note: params.note,
+  })
+
+  // Play double-tone chime before speaking
+  if (params.playChimeFirst !== false) {
+    await playRestaurantChime(params.volume !== undefined ? params.volume * 0.25 : 0.2)
+  }
+
+  // Tier 1: Android Native TTS Bridge
+  if (window.AndroidTTS && typeof window.AndroidTTS.speak === 'function') {
+    try {
+      params.onStart?.()
+      window.AndroidTTS.speak(text)
+      setTimeout(() => {
+        params.onEnd?.()
+      }, 3000)
+      return true
+    } catch (err) {
+      console.warn('[AndroidTTS] Service request speak call failed, falling back:', err)
+    }
+  }
+
+  const { voice, isHindi } = findBestVoice()
+  const isHiddenTab = typeof document !== 'undefined' && document.visibilityState === 'hidden'
+
+  if (isHiddenTab) {
+    const cloudOk = await playCloudAudioTTS(text, params)
+    if (cloudOk) return true
+  }
+
+  if (isHindi && voice) {
+    const webSpeechOk = await playWebSpeechTTS(text, voice, params)
+    if (webSpeechOk) return true
+    const cloudOk = await playCloudAudioTTS(text, params)
+    if (cloudOk) return true
+  } else {
+    const cloudOk = await playCloudAudioTTS(text, params)
+    if (cloudOk) return true
+    const speechPayload = toPhoneticRomanHindi(text)
+    const fallbackOk = await playWebSpeechTTS(speechPayload, voice, params)
+    if (fallbackOk) return true
+  }
+
+  return false
+}
+
+/**
+ * Display native Android / browser notification for service calls.
+ */
+export function showServiceNotification(params: {
+  id?: string
+  tableLabel?: string | null
+  type: string
+  note?: string
+  speechAnnouncement?: string
+  onClick?: () => void
+}): boolean {
+  if (typeof window === 'undefined') return false
+
+  const table = params.tableLabel ? String(params.tableLabel) : 'काउंटर'
+  const typeLabel =
+    (SERVICE_REQUEST_ENGLISH_LABELS as Record<string, string>)[params.type] || params.type
+  const speechText =
+    params.speechAnnouncement ||
+    getHindiServiceAnnouncement({
+      tableLabel: params.tableLabel,
+      type: params.type,
+      note: params.note,
+    })
+
+  // 1. Android Native App: trigger heads-up notification + TTS
+  if (window.AndroidTTS && typeof window.AndroidTTS.showServiceNotification === 'function') {
+    try {
+      window.AndroidTTS.showServiceNotification(
+        params.id || 'service',
+        table,
+        params.type,
+        params.note || '',
+        speechText
+      )
+      return true
+    } catch (e) {
+      console.warn('[AndroidTTS] showServiceNotification error:', e)
+    }
+  } else if (window.AndroidTTS && typeof window.AndroidTTS.showOrderNotification === 'function') {
+    try {
+      window.AndroidTTS.showOrderNotification(
+        params.id || 'service',
+        table,
+        `🔔 ${typeLabel}${params.note ? ` (${params.note})` : ''}`,
+        speechText
+      )
+      return true
+    } catch (e) {
+      console.warn('[AndroidTTS] showOrderNotification fallback error:', e)
+    }
+  }
+
+  // 2. Standard Browser Web Notification API
+  if ('Notification' in window && Notification.permission === 'granted') {
+    try {
+      const title = `🔔 स्टाफ कॉल: टेबल ${table} (${typeLabel})`
+      const body = `📍 टेबल ${table} से ${typeLabel} के लिए बुलाया गया है।${params.note ? `\n📝 नोट: ${params.note}` : ''}\nकिचन डैशबोर्ड पर देखें`
+
+      const options: NotificationOptions & { renotify?: boolean } = {
+        body,
+        icon: '/icons/icon-192x192.png',
+        badge: '/icons/favicon-32x32.png',
+        tag: `service-${params.id || Date.now()}`,
+        renotify: true,
+      }
+
+      const notification = new Notification(title, options as NotificationOptions)
+      notification.onclick = () => {
+        window.focus()
+        params.onClick?.()
+        notification.close()
+      }
+      return true
+    } catch (err) {
+      console.warn('[Notification] Could not display service notification:', err)
       return false
     }
   }

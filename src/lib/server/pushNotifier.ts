@@ -58,3 +58,54 @@ export async function sendMobileOrderAlarm(order: OrderPushPayload): Promise<boo
     return false
   }
 }
+
+/**
+ * Dispatch high-priority mobile push alert for customer staff assistance calls.
+ */
+export async function sendMobileServiceAlarm(payload: {
+  tableLabel?: string | null
+  type: string
+  note?: string
+}): Promise<boolean> {
+  const topic = getOrderAlertTopic()
+  if (!topic) return false
+
+  try {
+    const tableText = payload.tableLabel ? `टेबल ${payload.tableLabel}` : 'काउंटर'
+    const typeLabel =
+      payload.type === 'water'
+        ? 'पीने का पानी (Drinking Water)'
+        : payload.type === 'bill'
+        ? 'बिल रिक्वेस्ट (Bill Request)'
+        : payload.type === 'assistance'
+        ? 'वेटर कॉल (Waiter Call)'
+        : payload.type === 'cleaning'
+        ? 'टेबल सफाई (Clean Table)'
+        : 'चम्मच / प्लेट (Cutlery)'
+
+    const title = `🔔 स्टाफ कॉल: ${tableText} (${typeLabel})`
+    const body = `📍 ${tableText} से ${typeLabel} के लिए बुलाया गया है।${
+      payload.note ? `\n📝 नोट: ${payload.note}` : ''
+    }`
+
+    const host = process.env.NEXT_PUBLIC_APP_URL || 'https://biriyani-badshah.vercel.app'
+    const clickUrl = `${host}/dashboard#kitchen`
+
+    const response = await fetch(`https://ntfy.sh/${topic}`, {
+      method: 'POST',
+      headers: {
+        Title: title,
+        Priority: 'urgent',
+        Tags: 'bell,information_source',
+        Click: clickUrl,
+        Actions: `view, डैशबोर्ड में देखें, ${clickUrl}`,
+      },
+      body,
+    })
+
+    return response.ok
+  } catch (error) {
+    console.warn('[PushAlert] Failed to dispatch mobile service alert:', error)
+    return false
+  }
+}

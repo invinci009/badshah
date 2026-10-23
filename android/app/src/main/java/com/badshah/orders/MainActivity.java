@@ -57,6 +57,18 @@ public class MainActivity extends BridgeActivity {
                 }
 
                 @JavascriptInterface
+                public void showServiceNotification(String requestId, String tableLabel, String serviceType, String note, String speechAnnouncement) {
+                    OrderBackgroundService.postServiceAlert(
+                        MainActivity.this,
+                        requestId,
+                        tableLabel,
+                        serviceType,
+                        note,
+                        speechAnnouncement
+                    );
+                }
+
+                @JavascriptInterface
                 public boolean isAvailable() {
                     return OrderBackgroundService.isTtsReady();
                 }

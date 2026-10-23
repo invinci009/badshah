@@ -310,3 +310,82 @@ export function getHindiTableAnnouncement(tableLabelOrOrder, itemsList) {
  */
 export const getHindiOrderAnnouncement = getHindiTableAnnouncement
 
+export const SERVICE_REQUEST_HINDI = {
+  water: 'पीने का पानी मांगा गया है।',
+  bill: 'बिल मांगा गया है।',
+  assistance: 'वेटर को बुलाया गया है।',
+  cleaning: 'टेबल साफ करने के लिए बुलाया गया है।',
+  other: 'चम्मच और प्लेट मांगी गई है।',
+}
+
+export const SERVICE_REQUEST_ENGLISH_LABELS = {
+  water: 'Drinking Water',
+  bill: 'Request Bill',
+  assistance: 'Waiter Call',
+  cleaning: 'Clean Table',
+  other: 'Cutlery / Plates',
+}
+
+/**
+ * Get natural Hindi phrasing for a table location without order prefixes.
+ * e.g. "14" -> "टेबल नंबर चौदह"
+ */
+export function getTableLocationPhrase(tableLabel) {
+  if (!tableLabel) return 'काउंटर'
+  const raw = String(tableLabel).trim()
+  if (!raw) return 'काउंटर'
+
+  for (const item of SPECIAL_LOCATION_MAP) {
+    if (item.match.test(raw)) {
+      return raw
+    }
+  }
+
+  const vipWithNumMatch = raw.match(/^(?:table\s*)?vip[-#\s]*(\d+)$/i)
+  if (vipWithNumMatch) {
+    const num = parseInt(vipWithNumMatch[1], 10)
+    const hindiNum = numberToHindiWords(num)
+    return `वीआईपी टेबल नंबर ${hindiNum}`
+  }
+
+  if (/^(?:table\s*)?vip$/i.test(raw)) {
+    return 'वीआईपी टेबल'
+  }
+
+  const standardNumMatch = raw.match(/^(?:table\s*|t[-#]?\s*)0*(\d+)$/i) || raw.match(/^0*(\d+)$/)
+  if (standardNumMatch) {
+    const num = parseInt(standardNumMatch[1], 10)
+    const hindiNum = numberToHindiWords(num)
+    return `टेबल नंबर ${hindiNum}`
+  }
+
+  const trailingNumMatch = raw.match(/^(.+?)[-#\s]+0*(\d+)$/i)
+  if (trailingNumMatch) {
+    const sectionName = trailingNumMatch[1].trim()
+    const num = parseInt(trailingNumMatch[2], 10)
+    const hindiNum = numberToHindiWords(num)
+    return `${sectionName} टेबल नंबर ${hindiNum}`
+  }
+
+  return `${raw} टेबल`
+}
+
+/**
+ * Generate Hindi voice announcement for staff assistance / service call.
+ * e.g. "सर्विस अलर्ट! टेबल नंबर चौदह से पीने का पानी मांगा गया है।"
+ */
+export function getHindiServiceAnnouncement(params) {
+  const tableLabel = typeof params === 'object' ? params?.tableLabel : params
+  const type = typeof params === 'object' ? params?.type : 'assistance'
+  const note = typeof params === 'object' ? params?.note : undefined
+
+  const location = getTableLocationPhrase(tableLabel)
+  const servicePhrase = SERVICE_REQUEST_HINDI[type] || 'स्टाफ सहायता बुलाई गई है।'
+
+  let text = `सर्विस अलर्ट! ${location} से ${servicePhrase}`
+  if (note && typeof note === 'string' && note.trim()) {
+    text += ` नोट: ${note.trim()}।`
+  }
+  return text
+}
+
