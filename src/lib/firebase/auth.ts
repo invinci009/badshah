@@ -20,8 +20,25 @@ export interface AuthUser {
  * Use this in API routes to authenticate dashboard requests.
  */
 export async function validateSession(token: string): Promise<AuthUser | null> {
+  if (!token || typeof token !== 'string') return null
+  const auth = getAdminAuth()
+
+  // 1. First verify as a long-lived Firebase session cookie (up to 14 days)
   try {
-    const decoded = await getAdminAuth().verifyIdToken(token)
+    const decoded = await auth.verifySessionCookie(token, false)
+    return {
+      uid: decoded.uid,
+      email: decoded.email || null,
+      displayName: decoded.name || null,
+      emailVerified: decoded.email_verified || false,
+    }
+  } catch {
+    // Session cookie verification failed, fall back to ID token
+  }
+
+  // 2. Fall back to standard Firebase ID token
+  try {
+    const decoded = await auth.verifyIdToken(token)
     return {
       uid: decoded.uid,
       email: decoded.email || null,

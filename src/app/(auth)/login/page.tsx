@@ -63,6 +63,13 @@ export default function LoginPage() {
         return
       }
 
+      // Sync cookies immediately to native Android persistent storage if on Android app
+      try {
+        if (typeof window !== 'undefined' && (window as any).AndroidTTS?.syncCookies) {
+          (window as any).AndroidTTS.syncCookies()
+        }
+      } catch {}
+
       // Successful login -> navigate to dashboard
       window.location.href = '/dashboard'
     } catch (err: unknown) {

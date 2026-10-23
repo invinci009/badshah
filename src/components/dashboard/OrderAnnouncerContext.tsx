@@ -358,6 +358,22 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
     }
   }, [announceOrderDirectly, announceServiceDirectly])
 
+  // Keep-alive heartbeat: ping /api/auth/session every 15 minutes to keep restaurant session active indefinitely
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const pingSession = async () => {
+      try {
+        await fetch('/api/auth/session', { cache: 'no-store' })
+        if (window.AndroidTTS && typeof window.AndroidTTS.syncCookies === 'function') {
+          window.AndroidTTS.syncCookies()
+        }
+      } catch {}
+    }
+    pingSession()
+    const timer = setInterval(pingSession, 15 * 60 * 1000)
+    return () => clearInterval(timer)
+  }, [])
+
   // Listen for speech synthesis voices and Android native TTS bridge
   useEffect(() => {
     if (typeof window === 'undefined') return

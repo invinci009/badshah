@@ -38,10 +38,20 @@ export async function POST(request: NextRequest) {
     const auth = getServerAuth()
     const userCredential = await signInWithEmailAndPassword(auth, resolvedEmail, password)
 
-    // Get ID token
+    // Get fresh ID token
     const idToken = await userCredential.user.getIdToken()
 
-    // Set session cookie
+    // Mint a long-lived 14-day Firebase session cookie (14 days = 14 * 24 * 60 * 60 * 1000 ms)
+    const expiresIn = 1000 * 60 * 60 * 24 * 14 // 14 days
+    let sessionCookie = idToken
+    try {
+      const { getAdminAuth } = await import('@/lib/firebase/admin')
+      sessionCookie = await getAdminAuth().createSessionCookie(idToken, { expiresIn })
+    } catch (sessionErr) {
+      console.warn('Could not create Firebase session cookie, using idToken fallback:', sessionErr)
+    }
+
+    // Set session response
     const response = NextResponse.json({
       success: true,
       user: {
@@ -50,13 +60,13 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    // Set Firebase token cookie
-    response.cookies.set('firebase_token', idToken, {
+    // Set Firebase token cookie (14 days)
+    response.cookies.set('firebase_token', sessionCookie, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      maxAge: 60 * 60 * 24 * 7, // 1 week
+      maxAge: 60 * 60 * 24 * 14, // 14 days
     })
 
     return response

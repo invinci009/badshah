@@ -163,6 +163,7 @@ export default function OrdersTab({
   const prevIds = useRef<Set<string>>(new Set())
   const newOrderIdsRef = useRef<Set<string>>(new Set())
   const ordersEtagRef = useRef<string | null>(null)
+  const authFailCountRef = useRef(0)
 
   const fetchOrders = useCallback(
     async (silent = false) => {
@@ -187,9 +188,14 @@ export default function OrdersTab({
           return
         }
         if (res.status === 401) {
-          window.location.href = '/login'
+          // Protect against accidental logout during temporary network or token transitions
+          authFailCountRef.current += 1
+          if (authFailCountRef.current >= 12) {
+            window.location.href = '/login'
+          }
           return
         }
+        authFailCountRef.current = 0
 
         const newEtag = res.headers.get('ETag')
         if (newEtag) ordersEtagRef.current = newEtag

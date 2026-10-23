@@ -397,7 +397,13 @@ public class OrderBackgroundService extends Service {
 
             // Forward session cookies so native background poller authenticates when WebView is sleeping
             try {
-                String cookies = android.webkit.CookieManager.getInstance().getCookie("https://biriyani-badshah.vercel.app");
+                android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+                cm.flush();
+                String cookies = cm.getCookie("https://biriyani-badshah.vercel.app");
+                if (cookies == null || cookies.trim().isEmpty()) {
+                    cookies = getSharedPreferences("badshah_prefs", Context.MODE_PRIVATE)
+                        .getString("saved_cookies", null);
+                }
                 if (cookies != null && !cookies.trim().isEmpty()) {
                     conn.setRequestProperty("Cookie", cookies);
                 }
@@ -508,7 +514,13 @@ public class OrderBackgroundService extends Service {
             }
 
             try {
-                String cookies = android.webkit.CookieManager.getInstance().getCookie("https://biriyani-badshah.vercel.app");
+                android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+                cm.flush();
+                String cookies = cm.getCookie("https://biriyani-badshah.vercel.app");
+                if (cookies == null || cookies.trim().isEmpty()) {
+                    cookies = getSharedPreferences("badshah_prefs", Context.MODE_PRIVATE)
+                        .getString("saved_cookies", null);
+                }
                 if (cookies != null && !cookies.trim().isEmpty()) {
                     conn.setRequestProperty("Cookie", cookies);
                 }

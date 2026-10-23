@@ -100,6 +100,7 @@ export default function KitchenTab() {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const serviceEtagRef = useRef<string | null>(null)
+  const authFailCountRef = useRef(0)
 
   // 1. Sync active orders and details directly from centralized active orders state
   useEffect(() => {
@@ -150,9 +151,14 @@ export default function KitchenTab() {
         headers: sHeaders,
       })
       if (sRes.status === 401) {
-        window.location.href = '/login'
+        // Protect against accidental logout during temporary network or token transitions
+        authFailCountRef.current += 1
+        if (authFailCountRef.current >= 12) {
+          window.location.href = '/login'
+        }
         return
       }
+      authFailCountRef.current = 0
       if (sRes.status === 304) {
         return
       }

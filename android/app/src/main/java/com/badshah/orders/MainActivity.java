@@ -37,6 +37,19 @@ public class MainActivity extends BridgeActivity {
             // Allow auto-playing Hindi chime & speech announcements without requiring touch gestures
             settings.setMediaPlaybackRequiresUserGesture(false);
             settings.setDomStorageEnabled(true);
+            settings.setDatabaseEnabled(true);
+
+            // Enable persistent cookies in Android WebView across app restarts and sleeping screens
+            try {
+                android.webkit.CookieManager cookieManager = android.webkit.CookieManager.getInstance();
+                cookieManager.setAcceptCookie(true);
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                    cookieManager.setAcceptThirdPartyCookies(this.bridge.getWebView(), true);
+                }
+                cookieManager.flush();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
 
             // Expose native Android TTS & Order Notifications to JavaScript (window.AndroidTTS)
             this.bridge.getWebView().addJavascriptInterface(new Object() {
@@ -77,13 +90,39 @@ public class MainActivity extends BridgeActivity {
                 public void stop() {
                     OrderBackgroundService.stopSpeech();
                 }
+
+                @JavascriptInterface
+                public void syncCookies() {
+                    persistCookies(MainActivity.this);
+                }
             }, "AndroidTTS");
         }
+    }
+
+    public static void persistCookies(android.content.Context context) {
+        try {
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            cm.flush();
+            String c = cm.getCookie("https://biriyani-badshah.vercel.app");
+            if (c != null && !c.trim().isEmpty() && context != null) {
+                context.getSharedPreferences("badshah_prefs", android.content.Context.MODE_PRIVATE)
+                    .edit()
+                    .putString("saved_cookies", c)
+                    .apply();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        persistCookies(this);
     }
 
     @Override
     public void onPause() {
         super.onPause();
+        persistCookies(this);
         // Keep JavaScript timers and background order announcements running when minimized or screen off
         if (this.bridge != null && this.bridge.getWebView() != null) {
             this.bridge.getWebView().resumeTimers();

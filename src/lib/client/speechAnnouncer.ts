@@ -31,6 +31,7 @@ declare global {
       ) => void
       isAvailable: () => boolean
       stop: () => void
+      syncCookies?: () => void
     }
   }
 }
