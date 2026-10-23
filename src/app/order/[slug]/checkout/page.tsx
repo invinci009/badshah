@@ -540,6 +540,25 @@ export default function CheckoutPage() {
               </div>
             )
           })}
+          {selectedReward && (selectedReward.type === 'FREE_ITEM' || selectedReward.type === 'CUSTOM') && (
+            <div className="py-2.5 px-3 rounded-xl bg-emerald-50/90 border border-emerald-200/90 flex justify-between items-center text-sm shadow-2xs">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-7 h-7 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <Gift className="w-4 h-4" />
+                </div>
+                <div className="min-w-0">
+                  <p className="font-extrabold text-emerald-950 truncate flex items-center gap-1.5">
+                    <span>1 × {selectedReward.name}</span>
+                    <span className="text-[10px] uppercase font-black tracking-wider px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0">
+                      Free Gift
+                    </span>
+                  </p>
+                  <p className="text-[11px] text-emerald-700 font-medium">VIP Reward Included</p>
+                </div>
+              </div>
+              <span className="font-black text-emerald-700 text-xs shrink-0">FREE</span>
+            </div>
+          )}
           <div className="border-t border-stone-100 pt-3 space-y-1.5 text-sm">
             <div className="flex justify-between text-stone-600"><span>Subtotal</span><span>{formatPaise(preview.subtotal)}</span></div>
             <div className="flex justify-between text-stone-600"><span>Tax ({(taxRateBps / 100).toFixed(1)}%)</span><span>{formatPaise(preview.tax)}</span></div>

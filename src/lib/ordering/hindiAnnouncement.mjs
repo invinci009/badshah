@@ -173,11 +173,14 @@ export function formatHindiOrderItems(items, maxToSpeak = 4) {
   const validItems = items
     .map((item) => {
       if (typeof item === 'string') {
-        const name = item.trim()
+        const raw = item.trim()
+        const name = raw.replace(/\s*\([^)]*\)/g, '').trim() || raw
         return name ? { name, qty: 1 } : null
       }
       if (item && typeof item === 'object') {
-        const name = String(item.itemName || item.name || '').trim()
+        const rawName = String(item.itemName || item.name || '').trim()
+        // Strip parenthetical descriptors (e.g. "(VIP Reward)" or "(Half)") for natural speech
+        const name = rawName.replace(/\s*\([^)]*\)/g, '').trim() || rawName
         const qty = parseInt(String(item.quantity || item.qty || 1), 10) || 1
         return name ? { name, qty } : null
       }

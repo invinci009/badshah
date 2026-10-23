@@ -554,7 +554,7 @@ export default function OrdersTab({
               isKitchen ? '14px' : '12px'
             };">
               <span>${it.quantity} × ${it.itemName}</span>
-              ${!isKitchen ? `<span>${formatPaise(it.lineTotalPaise)}</span>` : ''}
+              ${!isKitchen ? `<span>${it.lineTotalPaise === 0 ? 'FREE' : formatPaise(it.lineTotalPaise)}</span>` : ''}
             </div>
             ${opts}
           </div>
@@ -1294,8 +1294,8 @@ export default function OrdersTab({
                           </span>
                           <span>{it.itemName}</span>
                         </span>
-                        <span className="font-bold text-slate-200">
-                          {formatPaise(it.lineTotalPaise)}
+                        <span className={`font-bold ${it.lineTotalPaise === 0 ? 'text-emerald-400' : 'text-slate-200'}`}>
+                          {it.lineTotalPaise === 0 ? 'FREE' : formatPaise(it.lineTotalPaise)}
                         </span>
                       </div>
                       {it.options && it.options.length > 0 && (

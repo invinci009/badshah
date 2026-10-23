@@ -309,15 +309,17 @@ public class OrderBackgroundService extends Service {
                         if (items != null && items.length() > 0) {
                             for (int j = 0; j < items.length(); j++) {
                                 JSONObject it = items.getJSONObject(j);
-                                String name = it.optString("itemName", it.optString("name", "आइटम"));
+                                String rawName = it.optString("itemName", it.optString("name", "आइटम"));
+                                String speechName = rawName.replaceAll("\\s*\\([^)]*\\)", "").trim();
+                                if (speechName.isEmpty()) speechName = rawName;
                                 int qty = it.optInt("quantity", it.optInt("qty", 1));
 
                                 if (j > 0) {
                                     itemsSummary.append(", ");
                                     itemsSpeech.append(j == items.length() - 1 ? " और " : ", ");
                                 }
-                                itemsSummary.append(qty).append("x ").append(name);
-                                itemsSpeech.append(qty).append(" ").append(name);
+                                itemsSummary.append(qty).append("x ").append(rawName);
+                                itemsSpeech.append(qty).append(" ").append(speechName);
                             }
                         }
 

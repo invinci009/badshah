@@ -14,7 +14,7 @@ interface KOrder {
   fulfilment: string
   notes?: string
   createdAt: string
-  items?: Array<{ quantity: number; itemName: string; options?: Array<{ optionName: string }> }>
+  items?: Array<{ quantity: number; itemName: string; options?: Array<{ optionName: string }>; lineTotalPaise?: number }>
 }
 
 interface KDetail {
@@ -26,7 +26,7 @@ interface KDetail {
     fulfilment: string
     notes?: string
     createdAt: string
-    items: Array<{ quantity: number; itemName: string; options?: Array<{ optionName: string }> }>
+    items: Array<{ quantity: number; itemName: string; options?: Array<{ optionName: string }>; lineTotalPaise?: number }>
   }
 }
 
@@ -260,12 +260,22 @@ export default function KitchenTab() {
                 </div>
                 <div className="mt-2 space-y-1 text-sm text-slate-200">
                   {d ? (
-                    d.items.map((it, i) => (
-                      <p key={i} className="font-semibold">
-                        {it.quantity} × {it.itemName}
-                        {it.options && it.options.length > 0 && <span className="block text-[11px] font-normal text-slate-400 pl-3">{it.options.map((x) => x.optionName).join(', ')}</span>}
-                      </p>
-                    ))
+                    d.items.map((it, i) => {
+                      const isFree = it.lineTotalPaise === 0 || it.itemName.toLowerCase().includes('reward')
+                      return (
+                        <div key={i} className="flex items-center justify-between gap-2 font-semibold">
+                          <div>
+                            <span>{it.quantity} × {it.itemName}</span>
+                            {it.options && it.options.length > 0 && <span className="block text-[11px] font-normal text-slate-400 pl-3">{it.options.map((x) => x.optionName).join(', ')}</span>}
+                          </div>
+                          {isFree && (
+                            <span className="text-[10px] uppercase font-black px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                              Free VIP
+                            </span>
+                          )}
+                        </div>
+                      )
+                    })
                   ) : (
                     <p className="text-xs text-slate-500 flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading items… ({o.itemCount})</p>
                   )}

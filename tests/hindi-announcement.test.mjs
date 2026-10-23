@@ -253,5 +253,29 @@ describe('Specific Order Items Hindi Announcement ("ye ye order hai")', () => {
       'नया ऑर्डर आया है। टेबल नंबर पाँच से ऑर्डर प्राप्त हुआ है।'
     )
   })
+
+  it('cleans parenthetical notes like (VIP Reward) when announcing items', () => {
+    const text = formatHindiOrderItems([
+      { itemName: 'Badshah Special Creamy Kabab', quantity: 1 },
+      { itemName: 'rasmlai (VIP Reward)', quantity: 1 },
+    ])
+    assert.equal(
+      text,
+      'ऑर्डर में है: एक Badshah Special Creamy Kabab, और एक rasmlai।'
+    )
+
+    const tableAnnounce = getHindiTableAnnouncement({
+      tableLabel: '5',
+      items: [
+        { itemName: 'Badshah Special Creamy Kabab', quantity: 1 },
+        { itemName: 'rasmlai (VIP Reward)', quantity: 1 },
+      ],
+    })
+    assert.equal(
+      tableAnnounce,
+      'नया ऑर्डर आया है। टेबल नंबर पाँच से ऑर्डर प्राप्त हुआ है। ऑर्डर में है: एक Badshah Special Creamy Kabab, और एक rasmlai।'
+    )
+  })
 })
+
 

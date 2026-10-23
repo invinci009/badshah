@@ -478,17 +478,25 @@ export default function OrderConfirmationPage() {
         {/* Bill */}
         <div className="p-5 rounded-2xl bg-white border border-stone-200 shadow-sm space-y-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
           <h2 className="text-sm font-extrabold flex items-center gap-1.5"><Receipt className="w-4 h-4 text-amber-600" /> Bill Details</h2>
-          {order.items.map((it, idx: number) => (
-            <div key={idx} className="text-sm">
-              <div className="flex justify-between gap-2">
-                <span className="text-stone-700">{it.quantity} × {it.itemName}</span>
-                <span className="font-bold shrink-0">{formatPaise(it.lineTotalPaise)}</span>
+          {order.items.map((it, idx: number) => {
+            const isFree = it.lineTotalPaise === 0 || it.itemName.toLowerCase().includes('reward')
+            return (
+              <div key={idx} className="text-sm">
+                <div className="flex justify-between gap-2 items-center">
+                  <span className={`text-stone-700 flex items-center gap-1.5 ${isFree ? 'font-semibold text-emerald-950' : ''}`}>
+                    {isFree && <Gift className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                    {it.quantity} × {it.itemName}
+                  </span>
+                  <span className={`shrink-0 ${isFree ? 'font-black text-emerald-600 text-xs px-2 py-0.5 rounded-md bg-emerald-50 border border-emerald-200' : 'font-bold'}`}>
+                    {it.lineTotalPaise === 0 ? 'FREE' : formatPaise(it.lineTotalPaise)}
+                  </span>
+                </div>
+                {it.options && it.options.length > 0 && (
+                  <p className="text-[11px] text-stone-500 pl-2">{it.options.map((o) => o.optionName).join(', ')}</p>
+                )}
               </div>
-              {it.options && it.options.length > 0 && (
-                <p className="text-[11px] text-stone-500 pl-2">{it.options.map((o) => o.optionName).join(', ')}</p>
-              )}
-            </div>
-          ))}
+            )
+          })}
           <div className="border-t border-stone-100 pt-3 space-y-1.5 text-sm">
             <div className="flex justify-between text-stone-600"><span>Subtotal</span><span>{formatPaise(order.subtotalPaise)}</span></div>
             <div className="flex justify-between text-stone-600"><span>Tax</span><span>{formatPaise(order.taxPaise)}</span></div>

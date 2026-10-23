@@ -309,6 +309,24 @@ export async function POST(request: NextRequest) {
     }
 
     // 7. Persist (order number allocated atomically; snapshots immutable).
+    // If diner redeemed a free item or gift reward (e.g. Rasmalai), explicitly include it
+    // in order items so kitchen prepares it, receipts list it, and voice agent announces it.
+    if (redemption && (redemption.reward.type === 'FREE_ITEM' || redemption.reward.type === 'CUSTOM')) {
+      const rewardDisplayName =
+        redemption.reward.name.toLowerCase().includes('reward') ||
+        redemption.reward.name.toLowerCase().includes('vip')
+          ? redemption.reward.name
+          : `${redemption.reward.name} (VIP Reward)`
+      snapshots.push({
+        itemId: `reward-${redemption.reward.id}`,
+        itemName: rewardDisplayName,
+        unitPricePaise: 0,
+        quantity: 1,
+        options: [],
+        lineTotalPaise: 0,
+      })
+    }
+
     const { orderNumber } = await allocateOrderNumber()
     const accessToken = generateOrderAccessToken()
     let order
