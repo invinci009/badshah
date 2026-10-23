@@ -273,13 +273,12 @@ export default function DashboardWorkspace({
       <MobileBottomNav
         activeTab={activeTab}
         onSelectTab={handleTabChange}
-        phoneCount={phoneCount}
-        responsesCount={responses.length}
+        tablesCount={tables.length}
         hasFeedback={feedbackList.length > 0}
         onOpenMore={() => setIsMoreDrawerOpen(true)}
       />
 
-      {/* Mobile Slide-up Drawer */}
+      {/* Mobile Slide-up Drawer with all 13 restaurant modules */}
       <MobileMenuDrawer
         isOpen={isMoreDrawerOpen}
         onClose={() => setIsMoreDrawerOpen(false)}
@@ -287,6 +286,11 @@ export default function DashboardWorkspace({
         onRefresh={handleRefresh}
         feedbackCount={feedbackList.length}
         menuItemsCount={menuItems.length}
+        orderMenuCount={orderMenuCount}
+        tablesCount={tables.length}
+        responsesCount={responses.length}
+        customersCount={phoneCount}
+        campaignsCount={campaigns.length}
         restaurantName={business.name}
         restaurantLocation={business.location || undefined}
       />

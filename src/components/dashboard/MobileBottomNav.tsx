@@ -3,18 +3,19 @@
 import React from 'react'
 import {
   LayoutDashboard,
-  Users,
-  MessageSquare,
-  QrCode,
+  Receipt,
+  ChefHat,
+  Table2,
   Menu,
 } from 'lucide-react'
+import { useOrderAnnouncer } from './OrderAnnouncerContext'
 import type { TabType } from './DashboardWorkspace'
 
 interface MobileBottomNavProps {
   activeTab: string
   onSelectTab: (tab: TabType) => void
-  phoneCount?: number
-  responsesCount?: number
+  ordersCount?: number
+  tablesCount?: number
   hasFeedback?: boolean
   onOpenMore: () => void
 }
@@ -22,12 +23,14 @@ interface MobileBottomNavProps {
 export default function MobileBottomNav({
   activeTab,
   onSelectTab,
-  phoneCount = 0,
-  responsesCount = 0,
+  ordersCount = 0,
+  tablesCount = 0,
   hasFeedback = false,
   onOpenMore,
 }: MobileBottomNavProps) {
-  const isMoreActive = activeTab === 'menu' || activeTab === 'feedback' || activeTab === 'settings'
+  const { activeOrders, activeServiceCall } = useOrderAnnouncer()
+  const liveOrdersCount = activeOrders.length || ordersCount
+  const isMoreActive = !['overview', 'orders', 'kitchen', 'tables'].includes(activeTab)
 
   const navItems = [
     {
@@ -39,28 +42,29 @@ export default function MobileBottomNav({
       isActive: activeTab === 'overview',
     },
     {
-      key: 'customers',
-      label: 'Customers',
-      icon: Users,
-      badge: phoneCount > 0 ? phoneCount : undefined,
-      onClick: () => onSelectTab('customers'),
-      isActive: activeTab === 'customers',
+      key: 'orders',
+      label: 'Orders',
+      icon: Receipt,
+      badge: liveOrdersCount > 0 ? liveOrdersCount : undefined,
+      onClick: () => onSelectTab('orders'),
+      isActive: activeTab === 'orders',
     },
     {
-      key: 'responses',
-      label: 'Responses',
-      icon: MessageSquare,
-      badge: responsesCount > 0 ? responsesCount : undefined,
-      onClick: () => onSelectTab('responses'),
-      isActive: activeTab === 'responses',
+      key: 'kitchen',
+      label: 'Kitchen',
+      icon: ChefHat,
+      badge: activeServiceCall ? '!' : liveOrdersCount > 0 ? liveOrdersCount : undefined,
+      isAlert: !!activeServiceCall,
+      onClick: () => onSelectTab('kitchen'),
+      isActive: activeTab === 'kitchen',
     },
     {
-      key: 'campaigns',
-      label: 'QR Codes',
-      icon: QrCode,
-      badge: undefined,
-      onClick: () => onSelectTab('campaigns'),
-      isActive: activeTab === 'campaigns',
+      key: 'tables',
+      label: 'Tables',
+      icon: Table2,
+      badge: tablesCount > 0 ? tablesCount : undefined,
+      onClick: () => onSelectTab('tables'),
+      isActive: activeTab === 'tables',
     },
     {
       key: 'more',
@@ -106,7 +110,9 @@ export default function MobileBottomNav({
                 {item.badge !== undefined && (
                   <span
                     className={`absolute -top-1.5 -right-2.5 min-w-[16px] h-4 px-1 rounded-full text-[9px] font-black flex items-center justify-center leading-none ${
-                      item.badge === '•'
+                      item.badge === '!'
+                        ? 'bg-amber-500 text-stone-950 font-black animate-bounce'
+                        : item.badge === '•'
                         ? 'bg-rose-500 text-white w-2 h-2 min-w-0 p-0'
                         : active
                         ? 'bg-amber-400 text-slate-950'

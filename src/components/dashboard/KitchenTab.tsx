@@ -1,9 +1,57 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChefHat, Volume2, VolumeX, Loader2, BellRing, Check } from 'lucide-react'
+import {
+  ChefHat,
+  Volume2,
+  VolumeX,
+  Loader2,
+  BellRing,
+  Check,
+  Droplets,
+  HandPlatter,
+  Brush,
+  UtensilsCrossed,
+  Receipt,
+} from 'lucide-react'
 import { formatTableDisplay } from '@/lib/ordering/rules.mjs'
 import { useOrderAnnouncer } from './OrderAnnouncerContext'
+
+const SERVICE_TYPE_META: Record<
+  string,
+  { label: string; hindiLabel: string; icon: React.ElementType; color: string }
+> = {
+  water: {
+    label: 'Drinking Water',
+    hindiLabel: 'पीने का पानी',
+    icon: Droplets,
+    color: 'text-sky-400 bg-sky-500/15 border-sky-500/30',
+  },
+  bill: {
+    label: 'Request Bill',
+    hindiLabel: 'बिल मांगा गया',
+    icon: Receipt,
+    color: 'text-emerald-400 bg-emerald-500/15 border-emerald-500/30',
+  },
+  assistance: {
+    label: 'Waiter Call',
+    hindiLabel: 'वेटर सहायता',
+    icon: HandPlatter,
+    color: 'text-amber-400 bg-amber-500/15 border-amber-500/30',
+  },
+  cleaning: {
+    label: 'Clean Table',
+    hindiLabel: 'टेबल सफाई',
+    icon: Brush,
+    color: 'text-purple-400 bg-purple-500/15 border-purple-500/30',
+  },
+  other: {
+    label: 'Cutlery / Plates',
+    hindiLabel: 'चम्मच और प्लेट',
+    icon: UtensilsCrossed,
+    color: 'text-orange-400 bg-orange-500/15 border-orange-500/30',
+  },
+}
 
 interface KOrder {
   id: string
@@ -224,17 +272,85 @@ export default function KitchenTab() {
       )}
 
       {requests.length > 0 && (
-        <div className="p-3 rounded-2xl bg-sky-500/10 border border-sky-500/30 space-y-2">
-          <p className="text-xs font-bold text-sky-300 flex items-center gap-1.5"><BellRing className="w-4 h-4" /> Staff calls ({requests.length})</p>
-          {requests.map((r) => (
-            <div key={r.id} className="flex items-center justify-between text-xs text-sky-200 gap-2">
-              <span>{formatTableDisplay(r.tableLabel)} — {r.type}{r.note ? `: ${r.note}` : ''}</span>
-              <div className="flex gap-1.5 shrink-0">
-                <button type="button" onClick={() => resolveReq(r.id, 'ACK')} className="px-2 py-1 rounded-lg bg-sky-600 text-white font-bold cursor-pointer">Ack</button>
-                <button type="button" onClick={() => resolveReq(r.id, 'RESOLVED')} className="px-2 py-1 rounded-lg bg-emerald-600 text-white font-bold cursor-pointer">Done</button>
-              </div>
-            </div>
-          ))}
+        <div className="p-4 rounded-3xl bg-gradient-to-r from-amber-950/40 via-slate-900 to-amber-950/40 border-2 border-amber-500/40 space-y-3 shadow-xl">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-black text-amber-300 flex items-center gap-2">
+              <BellRing className="w-4 h-4 text-amber-400 animate-bounce" />
+              <span>Customer Assistance Calls</span>
+              <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                {requests.length} pending
+              </span>
+            </p>
+            <span className="text-[11px] text-amber-400/80 font-medium hidden sm:inline">
+              Voice announced on kitchen &amp; admin devices
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+            {requests.map((r) => {
+              const meta = SERVICE_TYPE_META[r.type] || {
+                label: r.type,
+                hindiLabel: 'सहायता कॉल',
+                icon: BellRing,
+                color: 'text-amber-400 bg-amber-500/15 border-amber-500/30',
+              }
+              const Icon = meta.icon
+
+              return (
+                <div
+                  key={r.id}
+                  className="p-3 rounded-2xl bg-slate-950/80 border border-slate-800 flex flex-col justify-between gap-2.5 shadow-md hover:border-amber-500/40 transition-colors"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 border ${meta.color}`}>
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="px-2 py-0.5 rounded-lg bg-amber-500/20 text-amber-300 font-black text-xs border border-amber-500/40">
+                            {formatTableDisplay(r.tableLabel)}
+                          </span>
+                          <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">
+                            {r.status}
+                          </span>
+                        </div>
+                        <p className="text-xs font-bold text-slate-100 truncate mt-0.5">
+                          {meta.label} <span className="text-slate-400 font-normal">({meta.hindiLabel})</span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {r.note && (
+                    <p className="text-[11px] text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl px-2.5 py-1 italic">
+                      &ldquo;{r.note}&rdquo;
+                    </p>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-1 border-t border-slate-800/80">
+                    {r.status === 'OPEN' && (
+                      <button
+                        type="button"
+                        onClick={() => resolveReq(r.id, 'ACK')}
+                        className="flex-1 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-bold transition-colors cursor-pointer border border-slate-700"
+                      >
+                        Acknowledge
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => resolveReq(r.id, 'RESOLVED')}
+                      className="flex-1 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black transition-colors cursor-pointer flex items-center justify-center gap-1 shadow-xs"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Done</span>
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 
