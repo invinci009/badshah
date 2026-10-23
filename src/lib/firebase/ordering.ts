@@ -64,7 +64,58 @@ export async function getTables(includeInactive = true): Promise<DiningTable[]> 
     const snapshot = await q.get()
     return snapshot.docs.map((d) => ({ id: d.id, ...d.data() }) as DiningTable)
   })
-  return includeInactive ? tables : tables.filter((t) => t.active)
+
+  // Auto-release tables:
+  // - Tables in 'cleaning' for > 15 minutes auto-revert to 'available'
+  // - Tables in 'occupied' for > 2 hours auto-revert to 'available'
+  const now = Date.now()
+  const staleTableIds: string[] = []
+
+  const processed = tables.map((t) => {
+    if (t.state === 'cleaning' || t.state === 'occupied') {
+      const updatedMs = t.updatedAt ? new Date(t.updatedAt).getTime() : 0
+      const ageMs = updatedMs > 0 ? now - updatedMs : Infinity
+      const threshold = t.state === 'cleaning' ? 15 * 60 * 1000 : 2 * 60 * 60 * 1000
+
+      if (ageMs > threshold) {
+        staleTableIds.push(t.id)
+        return { ...t, state: 'available' as TableState }
+      }
+    }
+    return t
+  })
+
+  // Asynchronously sync stale tables in Firestore without blocking read response
+  if (staleTableIds.length > 0) {
+    Promise.allSettled(
+      staleTableIds.map((id) =>
+        getDb().doc(`diningTables/${id}`).update({ state: 'available', updatedAt: serverNow() })
+      )
+    ).catch(() => {})
+    invalidateCache('tables:all')
+  }
+
+  return includeInactive ? processed : processed.filter((t) => t.active)
+}
+
+/** Reset all dining tables to available state. */
+export async function freeAllTables(): Promise<number> {
+  const q = getDb().collection('diningTables')
+  const snap = await q.get()
+  const batch = getDb().batch()
+  let count = 0
+  for (const doc of snap.docs) {
+    const d = doc.data()
+    if (d.state !== 'available') {
+      batch.update(doc.ref, { state: 'available', updatedAt: serverNow() })
+      count++
+    }
+  }
+  if (count > 0) {
+    await batch.commit()
+    invalidateCache('tables:all')
+  }
+  return count
 }
 
 export async function getTable(id: string): Promise<DiningTable | null> {

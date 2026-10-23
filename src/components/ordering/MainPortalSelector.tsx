@@ -65,7 +65,7 @@ export default function MainPortalSelector({
     if (state === 'occupied' && !isOwnActive) {
       return
     }
-    if (state === 'cleaning') {
+    if (state === 'cleaning' && !isOwnActive) {
       return
     }
 
@@ -182,7 +182,7 @@ export default function MainPortalSelector({
                 const isSelected = effectiveTable === t.label
                 const isOwnActive = activeSession?.tableLabel === t.label
                 const isOccupied = t.state === 'occupied' && !isOwnActive
-                const isCleaning = t.state === 'cleaning'
+                const isCleaning = t.state === 'cleaning' && !isOwnActive
 
                 if (isOccupied) {
                   return (

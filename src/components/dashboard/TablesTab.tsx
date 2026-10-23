@@ -19,6 +19,7 @@ import {
   Trash2,
   AlertTriangle,
   X,
+  Sparkles,
 } from 'lucide-react'
 import { formatTableDisplay } from '@/lib/ordering/rules.mjs'
 
@@ -50,6 +51,7 @@ export default function TablesTab({ tables, portalSlug, onRefresh }: TablesTabPr
   const [tableToDelete, setTableToDelete] = useState<TableItem | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [isFreeingAll, setIsFreeingAll] = useState(false)
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -60,6 +62,29 @@ export default function TablesTab({ tables, portalSlug, onRefresh }: TablesTabPr
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [tableToDelete, isDeleting])
+
+  const handleFreeAll = async () => {
+    if (!confirm('Free up all dining tables and set them to Available?')) return
+    setIsFreeingAll(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/business/tables', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'free-all' }),
+      })
+      if (res.ok) {
+        setSuccessMessage('All dining tables are now Available')
+        onRefresh()
+      } else {
+        setError('Failed to free tables')
+      }
+    } catch {
+      setError('Connection error')
+    } finally {
+      setIsFreeingAll(false)
+    }
+  }
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -239,9 +264,21 @@ export default function TablesTab({ tables, portalSlug, onRefresh }: TablesTabPr
       )}
 
       <Card className="border-slate-800 bg-slate-900/60 backdrop-blur-xl">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm text-white">Add Table</CardTitle>
-          <CardDescription className="text-xs text-slate-400">e.g. T1, Family-4, Rooftop-A</CardDescription>
+        <CardHeader className="pb-3 flex flex-row items-center justify-between gap-3">
+          <div>
+            <CardTitle className="text-sm text-white">Add Table</CardTitle>
+            <CardDescription className="text-xs text-slate-400">e.g. T1, Family-4, Rooftop-A</CardDescription>
+          </div>
+          <Button
+            type="button"
+            onClick={handleFreeAll}
+            disabled={isFreeingAll}
+            className="bg-emerald-600/90 hover:bg-emerald-500 text-white text-xs font-bold h-9 px-3.5 rounded-xl cursor-pointer shrink-0 flex items-center gap-1.5 transition-all active:scale-95 border border-emerald-500/40"
+            title="Set all booked and cleaning tables to Available"
+          >
+            {isFreeingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            <span>Free All Tables</span>
+          </Button>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleCreate} className="flex gap-3">

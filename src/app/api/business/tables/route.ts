@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getTables, createTable, updateTable, deleteTable } from '@/lib/firebase/ordering'
+import { getTables, createTable, updateTable, deleteTable, freeAllTables } from '@/lib/firebase/ordering'
 import { getSessionFromRequest } from '@/lib/firebase/auth'
 import { tableCreateSchema, tablePatchSchema } from '@/lib/ordering/validation'
 
@@ -45,6 +45,10 @@ export async function PATCH(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const body = await request.json().catch(() => ({}))
+    if (body?.action === 'free-all') {
+      const count = await freeAllTables()
+      return NextResponse.json({ success: true, count }, { status: 200 })
+    }
     const parsed = tablePatchSchema.safeParse(body)
     if (!parsed.success) {
       return NextResponse.json({ error: 'Invalid payload' }, { status: 400 })
