@@ -116,6 +116,16 @@ function getVoiceServerSnapshot(): boolean {
   return true
 }
 
+const DEFAULT_ENGINE_STATUS: VoiceEngineStatus = {
+  supported: false,
+  hasHindiVoice: false,
+  activeVoiceName: null,
+  activeVoiceLang: null,
+  isFallback: false,
+  audioUnlocked: false,
+  notificationPermission: 'unsupported',
+}
+
 export function OrderAnnouncerProvider({ children }: { children: React.ReactNode }) {
   const isVoiceEnabled = useSyncExternalStore(
     subscribeToVoiceStorage,
@@ -123,16 +133,18 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
     getVoiceServerSnapshot
   )
 
+  const [isMounted, setIsMounted] = useState<boolean>(false)
   const [activeOrders, setActiveOrders] = useState<IncomingOrderInfo[]>([])
   const [serviceRequests, setServiceRequests] = useState<IncomingServiceRequestInfo[]>([])
   const [isSyncing, setIsSyncing] = useState<boolean>(false)
 
-  const [engineStatus, setEngineStatus] = useState<VoiceEngineStatus>(() => getVoiceEngineStatus())
+  // Start with default status to prevent SSR vs client hydration mismatch
+  const [engineStatus, setEngineStatus] = useState<VoiceEngineStatus>(DEFAULT_ENGINE_STATUS)
   const [isAnnouncing, setIsAnnouncing] = useState(false)
   const [lastAnnouncement, setLastAnnouncement] = useState<string | null>(null)
   const [activeArrival, setActiveArrival] = useState<IncomingOrderInfo | null>(null)
   const [activeServiceCall, setActiveServiceCall] = useState<IncomingServiceRequestInfo | null>(null)
-  const [audioUnlocked, setAudioUnlocked] = useState<boolean>(() => getIsAudioUnlocked())
+  const [audioUnlocked, setAudioUnlocked] = useState<boolean>(true)
 
   const knownOrderIds = useRef<Set<string>>(new Set())
   const announcedOrderIds = useRef<Set<string>>(new Set())
@@ -376,9 +388,11 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
     return () => clearInterval(timer)
   }, [])
 
-  // Listen for speech synthesis voices and Android native TTS bridge
+  // Safely mount and listen for speech synthesis voices, audio unlock, and Android native TTS bridge
   useEffect(() => {
+    setIsMounted(true)
     if (typeof window === 'undefined') return
+
     const updateEngine = () => {
       setEngineStatus(getVoiceEngineStatus())
       setAudioUnlocked(getIsAudioUnlocked())
@@ -389,6 +403,7 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
     if ('speechSynthesis' in window) {
       window.speechSynthesis.addEventListener('voiceschanged', updateEngine)
     }
+    window.addEventListener('rp-audio-unlocked', updateEngine)
 
     const timer = setTimeout(updateEngine, 500)
 
@@ -397,6 +412,7 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
       if ('speechSynthesis' in window) {
         window.speechSynthesis.removeEventListener('voiceschanged', updateEngine)
       }
+      window.removeEventListener('rp-audio-unlocked', updateEngine)
     }
   }, [])
 
@@ -630,7 +646,7 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
     }
   }, [pollActiveOrders, pollServiceRequests])
 
-  const hasAndroid = typeof window !== 'undefined' && !!window.AndroidTTS
+  const hasAndroid = isMounted && typeof window !== 'undefined' && !!window.AndroidTTS
 
   return (
     <OrderAnnouncerContext.Provider
@@ -654,8 +670,11 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
         audioUnlocked,
       }}
     >
-      {/* Floating Audio Unlock Banner: Dismisses immediately on click or anywhere-tap */}
-      {!audioUnlocked && !hasAndroid && isVoiceEnabled && (
+      {/* 1. Main Dashboard Content (Guaranteed to be Child 0 on both Server and Client) */}
+      {children}
+
+      {/* 2. Floating Audio Unlock Banner: Strictly mounted client-side to eliminate hydration mismatch */}
+      {isMounted && !audioUnlocked && !hasAndroid && isVoiceEnabled && (
         <div
           onClick={() => {
             unlockAudio()
@@ -708,8 +727,8 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
         </div>
       )}
 
-      {/* Floating Active Service Call Heads-Up Alert on Admin Dashboard */}
-      {activeServiceCall && (
+      {/* 3. Floating Active Service Call Heads-Up Alert on Admin Dashboard */}
+      {isMounted && activeServiceCall && (
         <div
           onClick={dismissServiceCall}
           className="fixed top-16 left-1/2 -translate-x-1/2 z-50 max-w-md w-[92%] bg-gradient-to-r from-amber-600 via-orange-600 to-amber-700 border-2 border-amber-300 shadow-2xl shadow-black/80 rounded-2xl p-3.5 text-white flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-4 duration-300 cursor-pointer backdrop-blur ring-4 ring-amber-500/30"
@@ -757,8 +776,6 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
           </button>
         </div>
       )}
-
-      {children}
     </OrderAnnouncerContext.Provider>
   )
 }
