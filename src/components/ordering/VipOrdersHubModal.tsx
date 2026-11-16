@@ -141,7 +141,7 @@ export function VipOrdersHubModal({
         {loyaltyCustomer ? (
           <div className="space-y-4">
             {/* VIP Gold Card */}
-            <div className="relative p-4 rounded-2xl bg-gradient-to-br from-[#8a0214] via-[#9e0c1f] to-[#6b010f] text-white shadow-lg overflow-hidden border border-amber-400/40">
+            <div className="relative p-4 rounded-2xl bg-gradient-to-br from-[#0d3b1e] via-[#1a6234] to-[#0a2e16] text-white shadow-lg overflow-hidden border border-amber-400/40">
               <Sparkles className="absolute -right-4 -top-4 w-28 h-28 text-white/10 pointer-events-none" />
               <div className="relative z-10 flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -458,7 +458,7 @@ export function VipOrdersHubModal({
           /* Not logged in: Quick 10-digit login right here */
           <div className="space-y-4">
             <div className="text-center space-y-1.5 pt-1">
-              <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-tr from-[#8a0214] via-[#a30b1c] to-amber-600 text-white flex items-center justify-center shadow-md shadow-amber-900/20">
+              <div className="w-14 h-14 mx-auto rounded-2xl bg-gradient-to-tr from-[#0d3b1e] via-[#1a6234] to-amber-600 text-white flex items-center justify-center shadow-md shadow-emerald-950/20">
                 <Crown className="w-7 h-7 fill-amber-300/30 text-amber-200" />
               </div>
               <span className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-900 border border-amber-200">
@@ -524,7 +524,7 @@ export function VipOrdersHubModal({
                 type="button"
                 onClick={() => handlePhoneLogin(loginPhone, loginName)}
                 disabled={loginLoading || loginPhone.replace(/\D/g, '').length < 10}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-[#8a0214] via-[#9e0c1f] to-[#b45309] hover:brightness-110 disabled:opacity-50 text-white text-xs font-black shadow-md shadow-amber-900/20 transition-all active:scale-98 cursor-pointer flex items-center justify-center gap-1.5"
+                className="w-full py-3 rounded-xl bg-gradient-to-r from-[#0d3b1e] via-[#1a6234] to-[#b45309] hover:brightness-110 disabled:opacity-50 text-white text-xs font-black shadow-md shadow-emerald-950/20 transition-all active:scale-98 cursor-pointer flex items-center justify-center gap-1.5"
               >
                 {loginLoading ? (
                   <>

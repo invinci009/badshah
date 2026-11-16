@@ -282,6 +282,31 @@ export default function OrderConfirmationPage() {
 
   return (
     <div className="min-h-screen bg-[#faf8f5] text-stone-900 pb-10">
+      <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-stone-200 px-3 py-2.5 shadow-2xs">
+        <div className="flex items-center justify-between max-w-lg mx-auto">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl overflow-hidden border border-emerald-400 bg-white shrink-0 p-0.5 shadow-xs">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.png" alt="Biryani Badshah" className="w-full h-full object-contain" />
+            </div>
+            <div>
+              <p className="font-onstage font-bruce font-black text-sm uppercase tracking-wide text-stone-900 leading-none">
+                BIRYANI BADSHAH
+              </p>
+              <p className="font-script text-[11px] text-emerald-800 leading-none mt-0.5">
+                A Family Restaurant
+              </p>
+            </div>
+          </div>
+          <Link
+            href={`/order/${slug}/menu`}
+            className="text-xs font-bold text-emerald-800 hover:text-emerald-950 px-3 py-1 rounded-xl bg-emerald-50 border border-emerald-200 transition-colors"
+          >
+            Menu
+          </Link>
+        </div>
+      </header>
+
       <main className="max-w-lg mx-auto px-3 py-4 space-y-4">
         {/* Status Card */}
         <div className="p-6 rounded-3xl bg-white border border-stone-200 shadow-2xl text-center space-y-4 animate-in fade-in zoom-in-95 duration-300">

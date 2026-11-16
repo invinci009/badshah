@@ -45,6 +45,8 @@ import { TableSelectModal } from '@/components/ordering/TableSelectModal'
 import { ServiceCallModal } from '@/components/ordering/ServiceCallModal'
 import { VipOrdersHubModal, type CustomerPreviousOrder, type LoyaltyRewardItem } from '@/components/ordering/VipOrdersHubModal'
 import { ItemCard } from '@/components/ordering/ItemCard'
+import { SpecialMenuSection } from '@/components/ordering/SpecialMenuSection'
+import { ALL_SPECIAL_ITEMS_MAP } from '@/lib/ordering/specialMenuData'
 
 function formatOrderDate(isoString: string): string {
   try {
@@ -427,10 +429,18 @@ export default function OrderMenuPage() {
 
   const itemById = useMemo(() => new Map(items.map((i) => [i.id, i])), [items])
 
+  const regularItems = useMemo(
+    () => items.filter((i) => i.categoryId !== 'mehman_nawazi' && !i.id.startsWith('special-')),
+    [items]
+  )
+
   const cartCount = cart.reduce((s, l) => s + l.quantity, 0)
   const cartEstimate = cart.reduce((s, l) => {
     const item = itemById.get(l.itemId)
-    if (!item) return s
+    if (!item) {
+      const special = ALL_SPECIAL_ITEMS_MAP.get(l.itemId)
+      return special ? s + special.pricePaise * l.quantity : s
+    }
     const opts = l.selections.reduce((sum, sel) => {
       const g = item.options.find((g) => g.id === sel.groupId)
       const c = g?.choices.find((c) => c.id === sel.optionId)
@@ -440,6 +450,10 @@ export default function OrderMenuPage() {
   }, 0)
 
   const filtered = items.filter((i) => {
+    // Keep special items in their dedicated Mehman Nawazi section
+    if (activeCat === 'all' && (i.categoryId === 'mehman_nawazi' || i.id.startsWith('special-'))) {
+      return false
+    }
     if (activeCat !== 'all' && (i.categoryId || 'uncategorized') !== activeCat) return false
     if (
       search.trim() &&
@@ -543,17 +557,32 @@ export default function OrderMenuPage() {
     return (
       <div className="min-h-screen bg-[#faf8f5] text-stone-900 pb-28">
         <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-stone-200 px-3 py-2.5 space-y-2">
-          <div className="flex items-center gap-2 max-w-2xl mx-auto">
-            <div className="w-9 h-9 rounded-xl bg-stone-200 animate-pulse" />
-            <div className="flex-1 space-y-1.5">
-              <div className="h-4 w-36 rounded bg-stone-200 animate-pulse" />
-              <div className="h-3 w-24 rounded bg-stone-100 animate-pulse" />
+          <div className="flex items-center justify-between gap-2 max-w-2xl mx-auto">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl overflow-hidden border border-emerald-400 shadow-xs shrink-0 bg-white flex items-center justify-center p-0.5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/logo.png" alt="Biryani Badshah" className="w-full h-full object-contain" />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-onstage font-bruce font-black tracking-wider uppercase text-base text-stone-900 leading-none">
+                  BIRYANI BADSHAH
+                </span>
+                <span className="font-script text-[11px] text-emerald-800 font-normal leading-none block mt-0.5">
+                  A Family Restaurant
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 text-xs text-emerald-800 font-bold bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200 animate-pulse">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-700" />
+              <span>Loading Menu...</span>
             </div>
           </div>
-          <div className="max-w-2xl mx-auto h-10 rounded-xl bg-stone-100 animate-pulse" />
-          <div className="flex gap-1.5 max-w-2xl mx-auto">
+          <div className="flex gap-1.5 max-w-2xl mx-auto overflow-x-auto no-scrollbar py-1">
+            <span className="px-3 py-1.5 rounded-full text-xs font-bold bg-emerald-800 text-white shrink-0">
+              Mehman Nawazi
+            </span>
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-8 w-20 rounded-full bg-stone-100 animate-pulse" />
+              <div key={i} className="h-7 w-20 rounded-full bg-stone-100 animate-pulse shrink-0" />
             ))}
           </div>
         </header>
@@ -609,21 +638,24 @@ export default function OrderMenuPage() {
       {/* Header */}
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur-md border-b border-stone-200 px-3 py-2.5 space-y-2.5 shadow-sm">
         <div className="flex items-center gap-2.5 max-w-2xl mx-auto">
-          <div className="w-9 h-9 rounded-xl overflow-hidden border border-amber-300 shadow-xs shrink-0 bg-slate-900 flex items-center justify-center">
+          <div className="w-9 h-9 rounded-xl overflow-hidden border border-emerald-400 shadow-xs shrink-0 bg-white flex items-center justify-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src="/logo.png"
               alt={restaurantName || 'Biryani Badshah'}
-              className="w-full h-full object-cover"
+              className="w-full h-full object-contain"
               onError={(e) => {
                 e.currentTarget.style.display = 'none'
               }}
             />
           </div>
           <div className="flex-1 min-w-0">
-            <h1 className="font-black text-base truncate flex items-center gap-1.5 text-stone-900 leading-tight">
+            <h1 className="font-onstage font-bruce font-black text-base truncate flex items-center gap-1.5 text-stone-900 leading-tight uppercase tracking-wider">
               <span>{restaurantName || 'Biryani Badshah'}</span>
             </h1>
+            <span className="font-script text-[11px] text-emerald-800 font-normal leading-none block -mt-0.5">
+              A Family Restaurant
+            </span>
             {token ? (
               <p className="text-[11px] font-semibold text-amber-700 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 inline-block" />
@@ -799,39 +831,75 @@ export default function OrderMenuPage() {
         </div>
 
         {/* Category Pills */}
-        <div className="-mx-3 -mb-2.5 px-3 py-2.5 bg-gradient-to-r from-[#8b0213] via-[#a50215] to-[#800511] shadow-inner">
+        <div className="-mx-3 -mb-2.5 px-3 py-2.5 bg-gradient-to-r from-[#0d3b1e] via-[#1a6234] to-[#0a2e16] shadow-inner">
           <div className="flex gap-2 overflow-x-auto max-w-2xl mx-auto no-scrollbar scrollbar-hide py-0.5">
             <button
               type="button"
               onClick={() => setActiveCat('all')}
               className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer transition-all active:scale-95 ${
                 activeCat === 'all'
-                  ? 'bg-white text-[#7f1d1d] shadow-sm font-extrabold'
+                  ? 'bg-white text-emerald-900 shadow-sm font-extrabold'
                   : 'bg-transparent text-white border border-white/85 hover:bg-white/10'
               }`}
             >
-              All Dishes ({items.length})
+              All Dishes ({regularItems.length})
             </button>
-            {categories.map((c) => {
-              const count = items.filter((i) => i.categoryId === c.id).length
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => setActiveCat(c.id)}
-                  className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer transition-all active:scale-95 ${
-                    activeCat === c.id
-                      ? 'bg-white text-[#7f1d1d] shadow-sm font-extrabold'
-                      : 'bg-transparent text-white border border-white/85 hover:bg-white/10'
-                  }`}
-                >
-                  {c.name} {count > 0 ? `(${count})` : ''}
-                </button>
-              )
-            })}
+            <button
+              type="button"
+              onClick={() => setActiveCat('special-menu')}
+              className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer transition-all active:scale-95 flex items-center gap-1.5 ${
+                activeCat === 'special-menu'
+                  ? 'bg-amber-300 text-stone-950 shadow-md font-black scale-105'
+                  : 'bg-emerald-950/80 text-amber-200 border border-amber-300/40 hover:bg-emerald-900'
+              }`}
+            >
+              <Crown className="w-3.5 h-3.5 text-amber-300 fill-amber-300/40" />
+              <span>👑 Mehman Nawazi (Party &amp; Handi)</span>
+            </button>
+            {categories
+              .filter((c) => c.id !== 'mehman_nawazi')
+              .map((c) => {
+                const count = items.filter((i) => i.categoryId === c.id).length
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => setActiveCat(c.id)}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-bold whitespace-nowrap cursor-pointer transition-all active:scale-95 ${
+                      activeCat === c.id
+                        ? 'bg-white text-emerald-900 shadow-sm font-extrabold'
+                        : 'bg-transparent text-white border border-white/85 hover:bg-white/10'
+                    }`}
+                  >
+                    {c.name} {count > 0 ? `(${count})` : ''}
+                  </button>
+                )
+              })}
           </div>
         </div>
       </header>
+
+      {/* ====== Special Menu Banner ====== */}
+      <div className="max-w-2xl mx-auto px-3 pt-3">
+        <Link
+          href={`/order/${slug}/special-menu${backParams.toString() ? `?${backParams.toString()}` : ''}`}
+          className="block p-3 rounded-2xl bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-700 text-white shadow-md hover:shadow-lg transition-all group relative overflow-hidden"
+        >
+          <div className="absolute inset-0 bg-[url('/logo.png')] bg-right bg-no-repeat bg-contain opacity-[0.08]" />
+          <div className="relative flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-white/15 border border-white/25 flex items-center justify-center shrink-0">
+                <Crown className="w-4.5 h-4.5 text-yellow-300 fill-yellow-400/30" />
+              </div>
+              <div>
+                <p className="text-xs font-black tracking-wide">Mehman Nawazi • Party Packs</p>
+                <p className="text-[10px] text-emerald-100/80">Shan-E-Biryani, Catering & Event Orders</p>
+              </div>
+            </div>
+            <ChevronRight className="w-4 h-4 text-emerald-200 group-hover:translate-x-0.5 transition-transform shrink-0" />
+          </div>
+        </Link>
+      </div>
 
       {/* Staff Toast Message */}
       {staffMsg && (
@@ -875,66 +943,96 @@ export default function OrderMenuPage() {
             </div>
           )}
 
-          {featured.length > 0 && (
-            <section className="space-y-2.5">
-              <h2 className="text-sm font-extrabold flex items-center gap-1.5 text-stone-900">
-                <Star className="w-4 h-4 text-amber-500 fill-amber-400" /> Chef&apos;s Specials
-              </h2>
-              <div className="grid grid-cols-1 gap-2.5">
-                {featured.map((item) => (
-                  <ItemCard
-                    key={item.id}
-                    item={item}
-                    onAdd={() => openCustomize(item)}
-                    justAdded={addedKey === cartLineKey(item.id, [])}
-                    qtyInCart={getItemQtyInCart(item.id)}
-                    onIncrement={() => handleQuickIncrement(item)}
-                    onDecrement={() => handleQuickDecrement(item.id)}
+          {/* Special Menu View when "👑 Mehman Nawazi (Party & Handi)" pill is active */}
+          {activeCat === 'special-menu' ? (
+            <div className="space-y-4">
+              <SpecialMenuSection
+                slug={slug}
+                phone={contactPhone}
+                cart={cart}
+                onAddToCart={(itemId) => addLine(itemId, [])}
+                onIncrement={(itemId) => addLine(itemId, [])}
+                onDecrement={(itemId) => handleQuickDecrement(itemId)}
+              />
+            </div>
+          ) : (
+            <>
+              {featured.length > 0 && (
+                <section className="space-y-2.5">
+                  <h2 className="text-sm font-extrabold flex items-center gap-1.5 text-stone-900">
+                    <Star className="w-4 h-4 text-amber-500 fill-amber-400" /> Chef&apos;s Specials
+                  </h2>
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {featured.map((item) => (
+                      <ItemCard
+                        key={item.id}
+                        item={item}
+                        onAdd={() => openCustomize(item)}
+                        justAdded={addedKey === cartLineKey(item.id, [])}
+                        qtyInCart={getItemQtyInCart(item.id)}
+                        onIncrement={() => handleQuickIncrement(item)}
+                        onDecrement={() => handleQuickDecrement(item.id)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <section className="space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-extrabold text-stone-900">
+                    {search ? `Search Results (${filtered.length})` : 'Menu Catalog'}
+                  </h2>
+                </div>
+
+                {filtered.length === 0 && (
+                  <div className="p-10 text-center text-sm text-stone-500 bg-white rounded-2xl border border-stone-200 space-y-2">
+                    <Search className="w-8 h-8 mx-auto text-stone-300" />
+                    <p className="font-semibold">No dishes match your search.</p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSearch('')
+                        setActiveCat('all')
+                        setDietFilter('all')
+                      }}
+                      className="text-xs text-amber-700 font-bold hover:underline"
+                    >
+                      Clear search &amp; show all dishes
+                    </button>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-2.5">
+                  {filtered.map((item) => (
+                    <ItemCard
+                      key={item.id}
+                      item={item}
+                      onAdd={() => openCustomize(item)}
+                      justAdded={addedKey === cartLineKey(item.id, [])}
+                      qtyInCart={getItemQtyInCart(item.id)}
+                      onIncrement={() => handleQuickIncrement(item)}
+                      onDecrement={() => handleQuickDecrement(item.id)}
+                    />
+                  ))}
+                </div>
+              </section>
+
+              {/* Also show Mehman Nawazi & Shan-E-Biryani section on all dishes view */}
+              {activeCat === 'all' && !search.trim() && dietFilter === 'all' && (
+                <div className="pt-4 border-t border-stone-200">
+                  <SpecialMenuSection
+                    slug={slug}
+                    phone={contactPhone}
+                    cart={cart}
+                    onAddToCart={(itemId) => addLine(itemId, [])}
+                    onIncrement={(itemId) => addLine(itemId, [])}
+                    onDecrement={(itemId) => handleQuickDecrement(itemId)}
                   />
-                ))}
-              </div>
-            </section>
+                </div>
+              )}
+            </>
           )}
-
-          <section className="space-y-2.5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-extrabold text-stone-900">
-                {search ? `Search Results (${filtered.length})` : 'Menu Catalog'}
-              </h2>
-            </div>
-
-            {filtered.length === 0 && (
-              <div className="p-10 text-center text-sm text-stone-500 bg-white rounded-2xl border border-stone-200 space-y-2">
-                <Search className="w-8 h-8 mx-auto text-stone-300" />
-                <p className="font-semibold">No dishes match your search.</p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSearch('')
-                    setActiveCat('all')
-                    setDietFilter('all')
-                  }}
-                  className="text-xs text-amber-700 font-bold hover:underline"
-                >
-                  Clear search &amp; show all dishes
-                </button>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 gap-2.5">
-              {filtered.map((item) => (
-                <ItemCard
-                  key={item.id}
-                  item={item}
-                  onAdd={() => openCustomize(item)}
-                  justAdded={addedKey === cartLineKey(item.id, [])}
-                  qtyInCart={getItemQtyInCart(item.id)}
-                  onIncrement={() => handleQuickIncrement(item)}
-                  onDecrement={() => handleQuickDecrement(item.id)}
-                />
-              ))}
-            </div>
-          </section>
 
           {/* Subtle Guest Feedback / Google Review Card */}
           <div className="pt-2 pb-6">
@@ -1015,20 +1113,25 @@ export default function OrderMenuPage() {
                 <div className="space-y-2 max-h-[340px] overflow-y-auto pr-1">
                   {cart.map((line) => {
                     const item = itemById.get(line.itemId)
-                    if (!item) return null
-                    const optTotal = line.selections.reduce((sum, sel) => {
-                      const g = item.options.find((grp) => grp.id === sel.groupId)
-                      const c = g?.choices.find((ch) => ch.id === sel.optionId)
-                      return sum + (c?.pricePaise || 0)
-                    }, 0)
-                    const lineTotal = (item.pricePaise + optTotal) * line.quantity
+                    const special = !item ? ALL_SPECIAL_ITEMS_MAP.get(line.itemId) : null
+                    if (!item && !special) return null
+                    const itemName = item ? item.name : special!.name
+                    const unitPrice = item ? item.pricePaise : special!.pricePaise
+                    const optTotal = item
+                      ? line.selections.reduce((sum, sel) => {
+                          const g = item.options.find((grp) => grp.id === sel.groupId)
+                          const c = g?.choices.find((ch) => ch.id === sel.optionId)
+                          return sum + (c?.pricePaise || 0)
+                        }, 0)
+                      : 0
+                    const lineTotal = (unitPrice + optTotal) * line.quantity
 
                     return (
                       <div key={line.key} className="p-2.5 rounded-xl bg-stone-50 border border-stone-200/70 space-y-1.5">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
-                            <p className="text-xs font-bold text-stone-900 truncate">{item.name}</p>
-                            {line.selections.length > 0 && (
+                            <p className="text-xs font-bold text-stone-900 truncate">{itemName}</p>
+                            {line.selections.length > 0 && item && (
                               <p className="text-[10px] text-stone-500 truncate">
                                 {line.selections
                                   .map((s) => item.options.find((g) => g.id === s.groupId)?.choices.find((c) => c.id === s.optionId)?.name)

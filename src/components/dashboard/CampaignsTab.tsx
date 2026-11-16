@@ -18,6 +18,8 @@ import {
   Trash2,
   Sparkles,
   Smartphone,
+  Crown,
+  UtensilsCrossed,
 } from 'lucide-react'
 
 export interface CampaignItem {
@@ -31,10 +33,13 @@ export interface CampaignItem {
 interface CampaignsTabProps {
   campaigns: CampaignItem[]
   onRefresh: () => void
+  businessSlug?: string
 }
 
-export default function CampaignsTab({ campaigns, onRefresh }: CampaignsTabProps) {
+export default function CampaignsTab({ campaigns, onRefresh, businessSlug }: CampaignsTabProps) {
+  const activeSlug = businessSlug || campaigns[0]?.slug || 'biryani-badshah-patna'
   const [copiedSlug, setCopiedSlug] = useState<string | null>(null)
+  const [copiedSpecial, setCopiedSpecial] = useState(false)
   const [isModalOpen, setIsModalOpen] = useState(false)
   const [newCampaignName, setNewCampaignName] = useState('')
   const [isCreating, setIsCreating] = useState(false)
@@ -46,6 +51,13 @@ export default function CampaignsTab({ campaigns, onRefresh }: CampaignsTabProps
     navigator.clipboard.writeText(url)
     setCopiedSlug(slug)
     setTimeout(() => setCopiedSlug(null), 2500)
+  }
+
+  const copySpecialMenuUrl = () => {
+    const url = `${window.location.origin}/order/${activeSlug}/special-menu`
+    navigator.clipboard.writeText(url)
+    setCopiedSpecial(true)
+    setTimeout(() => setCopiedSpecial(false), 2500)
   }
 
   const handleToggleActive = async (id: string, currentActive: boolean) => {
@@ -135,6 +147,109 @@ export default function CampaignsTab({ campaigns, onRefresh }: CampaignsTabProps
           <span>New QR Campaign</span>
         </Button>
       </div>
+
+      {/* ====== Special Menu & Catering Dedicated QR Section ====== */}
+      <Card className="border-emerald-500/40 bg-gradient-to-br from-emerald-950/60 via-slate-900/90 to-slate-950 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl border">
+        <CardHeader className="p-4 sm:p-6 pb-3 border-b border-emerald-500/20">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center shrink-0">
+                <Crown className="w-5 h-5 text-emerald-300" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <CardTitle className="text-lg font-heading font-black tracking-wide text-white">
+                    Mehman Nawazi &amp; Shan-E-Biryani — Special Menu QR
+                  </CardTitle>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    Dedicated QR
+                  </span>
+                </div>
+                <CardDescription className="text-xs text-emerald-200/70">
+                  Party Packs, Bulk Handis &amp; Catering Menu QR code for table standees and catering marketing
+                </CardDescription>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-script text-xs text-emerald-400">A Family Restaurant</span>
+            </div>
+          </div>
+        </CardHeader>
+
+        <CardContent className="p-4 sm:p-6 grid grid-cols-1 md:grid-cols-12 gap-5 items-center">
+          <div className="md:col-span-4 flex flex-col items-center">
+            <div className="p-3.5 rounded-2xl bg-white flex items-center justify-center shadow-lg border border-emerald-200">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={`/api/business/qr?slug=${encodeURIComponent(activeSlug)}&type=special&format=png`}
+                alt="Special Menu QR Code"
+                className="w-36 h-36 object-contain"
+              />
+            </div>
+            <p className="text-[11px] text-emerald-300/80 font-mono mt-2">/order/{activeSlug}/special-menu</p>
+          </div>
+
+          <div className="md:col-span-8 space-y-3.5">
+            <div className="p-3 rounded-2xl bg-emerald-950/40 border border-emerald-500/20 space-y-1 text-xs">
+              <p className="font-bold text-white flex items-center gap-1.5">
+                <UtensilsCrossed className="w-3.5 h-3.5 text-emerald-400" />
+                What customers see when scanning this QR:
+              </p>
+              <p className="text-slate-300 text-[11px] leading-relaxed">
+                Direct view of the <strong>Mehman Nawazi Party Pack</strong> (Motter Pulao, Meetha Zarda, Kormas, Kabab, Murg Mussallam, Raan, Baby Naan) and <strong>Shan-E-Biryani Handis</strong> (40-45 &amp; 75-80 pax).
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                type="button"
+                onClick={copySpecialMenuUrl}
+                className="h-10 px-4 rounded-xl border border-emerald-500/40 bg-emerald-900/40 hover:bg-emerald-800/40 text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-colors active:scale-95"
+              >
+                {copiedSpecial ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Link Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Copy Special Menu Link</span>
+                  </>
+                )}
+              </button>
+
+              <a
+                href={`/api/business/qr?slug=${encodeURIComponent(activeSlug)}&type=special&format=png&download=true`}
+                download="biryani-badshah-special-menu-qr.png"
+                className="h-10 px-3.5 rounded-xl border border-slate-700 bg-slate-800/90 hover:bg-slate-700 text-white text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Download PNG (Print)</span>
+              </a>
+
+              <a
+                href={`/api/business/qr?slug=${encodeURIComponent(activeSlug)}&type=special&format=svg&download=true`}
+                download="biryani-badshah-special-menu-qr.svg"
+                className="h-10 px-3.5 rounded-xl border border-slate-700 bg-slate-800/90 hover:bg-slate-700 text-white text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer active:scale-95"
+              >
+                <Download className="w-3.5 h-3.5 text-teal-400" />
+                <span>Download SVG (Vector)</span>
+              </a>
+
+              <a
+                href={`/order/${encodeURIComponent(activeSlug)}/special-menu`}
+                target="_blank"
+                rel="noreferrer"
+                className="h-10 px-3.5 rounded-xl border border-emerald-500/30 bg-emerald-950/50 hover:bg-emerald-900/50 text-emerald-300 text-xs font-semibold flex items-center gap-1.5 transition-colors ml-auto cursor-pointer"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Live Preview</span>
+              </a>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Campaigns Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">

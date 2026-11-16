@@ -208,3 +208,65 @@ describe('loyalty routes and components preservation', () => {
     assert.ok(content.includes('historyTab'), 'Activity history tabs must be present')
   })
 })
+
+describe('Loyalty Security & Edge Case Hardening (Cloudflare Audit Framework)', () => {
+  it('enforces session-authenticated redemption in orders route (no BOLA / unauthorized points burn)', () => {
+    const ordersPath = join(root, 'src/app/api/public/orders/route.ts')
+    const content = readFileSync(ordersPath, 'utf8')
+    // Must check that session exists, is verified, and customerId matches loyaltyCustomerPhone
+    assert.ok(
+      content.includes('AUTH_REQUIRED_FOR_REDEMPTION') ||
+        content.includes('!session.verified || session.customerId !== loyaltyCustomerPhone'),
+      'orders route must strictly verify session authenticity before allowing reward redemptions'
+    )
+    assert.ok(
+      content.includes('orderItemIds: input.items.map'),
+      'orders route must pass item IDs to enforce reward item applicability'
+    )
+  })
+
+  it('eliminates unauthenticated IDOR leak in loyalty summary route', () => {
+    const summaryPath = join(root, 'src/app/api/public/loyalty/summary/route.ts')
+    const content = readFileSync(summaryPath, 'utf8')
+    // Must NOT accept unauthenticated query param phone
+    assert.ok(
+      !content.includes("request.nextUrl.searchParams.get('phone')"),
+      'summary route must never leak customer data via unauthenticated ?phone= query param'
+    )
+    assert.ok(
+      content.includes('!session || !session.verified'),
+      'summary route must strictly require a verified customer session'
+    )
+  })
+
+  it('protects password-configured accounts against phone-login bypass', () => {
+    const authPath = join(root, 'src/app/api/public/loyalty/auth/route.ts')
+    const content = readFileSync(authPath, 'utf8')
+    assert.ok(
+      content.includes('PASSWORD_REQUIRED') && content.includes('verifyPassword'),
+      'phone-login must verify password if account has password hash and salt'
+    )
+  })
+
+  it('restricts sandbox OTP codes to non-production environments', () => {
+    const authPath = join(root, 'src/app/api/public/loyalty/auth/route.ts')
+    const content = readFileSync(authPath, 'utf8')
+    assert.ok(
+      !content.includes("sandboxCode: otp.code } : {}),\n        },\n        { status: 201 }\n      )\n    }\n\n    // ---- verify"),
+      'sandboxCode must never be unconditionally exposed in production'
+    )
+    assert.ok(
+      content.includes("process.env.NODE_ENV !== 'production'"),
+      'sandboxCode must be guarded behind non-production environment checks'
+    )
+  })
+
+  it('validates applicableItemIds logic in reward redemptions', () => {
+    const loyaltyPath = join(root, 'src/lib/firebase/loyalty.ts')
+    const content = readFileSync(loyaltyPath, 'utf8')
+    assert.ok(
+      content.includes('ITEM_NOT_APPLICABLE'),
+      'applyRedemptionForOrder must throw ITEM_NOT_APPLICABLE when cart lacks required items'
+    )
+  })
+})

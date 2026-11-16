@@ -126,6 +126,15 @@ export async function POST(request: NextRequest) {
       if (account.status === 'suspended') {
         return NextResponse.json({ error: 'This account is currently suspended. Please speak to staff.', code: 'SUSPENDED' }, { status: 403 })
       }
+      if (account.passwordHash && account.passwordSalt) {
+        const pwd = typeof body.password === 'string' ? body.password : ''
+        if (!pwd || !verifyPassword(pwd, account.passwordSalt, account.passwordHash)) {
+          return NextResponse.json(
+            { error: 'This VIP account is protected with a password. Please sign in with your password.', code: 'PASSWORD_REQUIRED' },
+            { status: 401 }
+          )
+        }
+      }
       const token = await createCustomerSessionToken({ customerId: phone, name: account.name, verified: true })
       await updateCustomerLogin(phone)
 
@@ -206,8 +215,10 @@ export async function POST(request: NextRequest) {
           success: true,
           pendingVerification: true,
           delivery,
-          // Sandbox fallback so sign-up works before SMS provider wiring.
-          ...(delivery.channel === 'sandbox' ? { sandboxCode: otp.code } : {}),
+          // Sandbox fallback only in non-production environments
+          ...(delivery.channel === 'sandbox' && process.env.NODE_ENV !== 'production'
+            ? { sandboxCode: otp.code }
+            : {}),
         },
         { status: 201 }
       )
@@ -274,7 +285,9 @@ export async function POST(request: NextRequest) {
             success: true,
             pendingVerification: true,
             delivery,
-            ...(delivery.channel === 'sandbox' ? { sandboxCode: otp.code } : {}),
+            ...(delivery.channel === 'sandbox' && process.env.NODE_ENV !== 'production'
+              ? { sandboxCode: otp.code }
+              : {}),
           },
           { status: 200 }
         )
@@ -307,7 +320,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         delivery,
-        ...(delivery.channel === 'sandbox' ? { sandboxCode: otp.code } : {}),
+        ...(delivery.channel === 'sandbox' && process.env.NODE_ENV !== 'production'
+          ? { sandboxCode: otp.code }
+          : {}),
       })
     }
 

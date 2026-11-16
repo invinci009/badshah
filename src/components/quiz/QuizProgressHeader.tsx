@@ -38,22 +38,22 @@ export default function QuizProgressHeader({
           )}
 
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-500 text-white flex items-center justify-center font-bold text-xs overflow-hidden shrink-0 shadow-sm border border-amber-300">
+            <div className="w-8 h-8 rounded-xl bg-white text-white flex items-center justify-center font-bold text-xs overflow-hidden shrink-0 shadow-sm border border-emerald-300">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={logoUrl || '/logo.png'}
                 alt={restaurantName}
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain"
                 onError={(e) => {
                   e.currentTarget.src = '/logo.png'
                 }}
               />
             </div>
             <div>
-              <span className="text-sm font-bold text-stone-900 truncate block max-w-[180px] sm:max-w-xs">
+              <span className="text-sm font-onstage font-bruce font-black tracking-wider uppercase text-stone-900 truncate block max-w-[180px] sm:max-w-xs leading-none">
                 {restaurantName || 'Biryani Badshah'}
               </span>
-              <span className="text-[10px] text-amber-800 font-semibold block">बिरयानी बादशाह</span>
+              <span className="font-script text-[11px] text-emerald-800 font-normal block leading-tight mt-0.5">A Family Restaurant</span>
             </div>
           </div>
         </div>

@@ -10,10 +10,22 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Slug parameter is required' }, { status: 400 })
   }
 
+  const type = searchParams.get('type') // 'feedback' | 'special' | 'menu'
+  const customPath = searchParams.get('path')
+
   const proto = request.headers.get('x-forwarded-proto') || (process.env.NODE_ENV === 'production' ? 'https' : 'http')
   const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || process.env.APP_DOMAIN || 'localhost:3000'
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${proto}://${host}`
-  const targetUrl = `${baseUrl.replace(/\/$/, '')}/r/${slug}`
+  
+  let targetUrl = `${baseUrl.replace(/\/$/, '')}/r/${slug}`
+  let qrColor = '#0f172a'
+
+  if (type === 'special' || customPath === 'special-menu') {
+    targetUrl = `${baseUrl.replace(/\/$/, '')}/order/${slug}/special-menu`
+    qrColor = '#1a6234' // Brand emerald green
+  } else if (customPath) {
+    targetUrl = `${baseUrl.replace(/\/$/, '')}/${customPath.replace(/^\//, '')}`
+  }
 
   try {
     if (format === 'svg') {
@@ -22,16 +34,17 @@ export async function GET(request: NextRequest) {
         margin: 2,
         width: 300,
         color: {
-          dark: '#0f172a',
+          dark: qrColor,
           light: '#ffffff',
         },
       })
       const isDownload = searchParams.get('download') === 'true'
+      const filename = type === 'special' ? `biryani-badshah-special-menu-qr.svg` : `reviewpulse-qr-${slug}.svg`
       return new NextResponse(svgString, {
         headers: {
           'Content-Type': 'image/svg+xml',
           ...(isDownload
-            ? { 'Content-Disposition': `attachment; filename="reviewpulse-qr-${slug}.svg"` }
+            ? { 'Content-Disposition': `attachment; filename="${filename}"` }
             : {}),
         },
       })
@@ -43,18 +56,19 @@ export async function GET(request: NextRequest) {
       margin: 2,
       width: 512,
       color: {
-        dark: '#0f172a',
+        dark: qrColor,
         light: '#ffffff',
       },
     })
 
     const isDownload = searchParams.get('download') === 'true'
+    const filename = type === 'special' ? `biryani-badshah-special-menu-qr.png` : `reviewpulse-qr-${slug}.png`
     return new NextResponse(new Uint8Array(pngBuffer), {
       headers: {
         'Content-Type': 'image/png',
-        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
         ...(isDownload
-          ? { 'Content-Disposition': `attachment; filename="reviewpulse-qr-${slug}.png"` }
+          ? { 'Content-Disposition': `attachment; filename="${filename}"` }
           : {}),
       },
     })

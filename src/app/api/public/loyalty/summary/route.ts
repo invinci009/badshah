@@ -43,17 +43,10 @@ export interface LoyaltySummaryResponse {
 export async function GET(request: NextRequest) {
   try {
     const session = await getCustomerSession(request)
-    let customerPhone = session?.customerId
-    if (!customerPhone) {
-      const queryPhone = request.nextUrl.searchParams.get('phone')
-      if (queryPhone) {
-        const normalized = normalizeCustomerPhone(queryPhone)
-        if (normalized) customerPhone = normalized
-      }
-    }
-    if (!customerPhone) {
+    if (!session || !session.verified) {
       return NextResponse.json({ error: 'Not logged in' }, { status: 401 })
     }
+    const customerPhone = session.customerId
     const account = await getCustomerAccount(customerPhone)
     if (!account) return NextResponse.json({ error: 'Not logged in' }, { status: 401 })
     if (account.status === 'suspended') {

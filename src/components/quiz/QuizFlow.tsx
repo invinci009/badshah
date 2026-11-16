@@ -286,12 +286,12 @@ export default function QuizFlow({
           <div className="p-5 sm:p-8 rounded-2xl sm:rounded-3xl bg-white border border-stone-200 shadow-[0_20px_60px_-15px_rgba(180,83,9,0.08),0_4px_20px_rgba(0,0,0,0.03)] space-y-5 sm:space-y-6 text-center animate-in fade-in zoom-in-95 duration-300">
             {/* Crest / Monogram Icon */}
             <div className="relative mx-auto w-20 h-20">
-              <div className="w-20 h-20 mx-auto rounded-3xl bg-gradient-to-tr from-amber-600 via-amber-500 to-yellow-500 text-white flex items-center justify-center shadow-xl shadow-amber-600/25 overflow-hidden border-2 border-amber-200">
+              <div className="w-20 h-20 mx-auto rounded-3xl bg-white text-white flex items-center justify-center shadow-xl shadow-emerald-600/25 overflow-hidden border-2 border-emerald-300">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={logoUrl || '/logo.png'}
                   alt={restaurantName}
-                  className="w-full h-full object-cover"
+                  className="w-full h-full object-contain"
                   onError={(e) => {
                     e.currentTarget.src = '/logo.png'
                   }}
@@ -304,14 +304,14 @@ export default function QuizFlow({
 
             {/* Restaurant Name & Subtitle */}
             <div className="space-y-1.5">
-              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-stone-900">
+              <h1 className="text-2xl sm:text-3xl font-onstage font-bruce font-black tracking-wider uppercase text-stone-900">
                 {restaurantName || 'Biryani Badshah'}
               </h1>
-              <p className="text-sm font-semibold text-amber-800">
-                बिरयानी बादशाह • Royal Mughlai & Biryani
+              <p className="font-script text-lg text-emerald-800 font-normal">
+                A Family Restaurant
               </p>
               <div className="pt-1 flex items-center justify-center gap-2 text-xs text-stone-500">
-                <span className="flex items-center gap-1 font-semibold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200/60">
+                <span className="flex items-center gap-1 font-semibold text-emerald-800 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200/60">
                   <Star className="w-3.5 h-3.5 fill-amber-500 text-amber-500" /> 4.5 • Royal Dining Experience
                 </span>
                 <span>•</span>

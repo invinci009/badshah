@@ -232,7 +232,7 @@ export default function LoyaltyHubPage() {
         {customer ? (
           <div className="space-y-4">
             {/* Badshah VIP Member Royal Gold Card */}
-            <div className="relative p-5 rounded-3xl bg-gradient-to-br from-[#8a0214] via-[#9e0c1f] to-[#6b010f] text-white shadow-xl overflow-hidden border border-amber-400/40">
+            <div className="relative p-5 rounded-3xl bg-gradient-to-br from-[#0d3b1e] via-[#1a6234] to-[#0a2e16] text-white shadow-xl overflow-hidden border border-amber-400/40">
               <Sparkles className="absolute -right-6 -top-6 w-36 h-36 text-white/10 pointer-events-none" />
               <div className="relative z-10 flex items-start justify-between">
                 <div>

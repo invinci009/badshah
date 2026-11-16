@@ -43,10 +43,14 @@ export default function OfflinePage() {
       {/* Top Header */}
       <header className="relative z-10 flex items-center justify-between max-w-md w-full mx-auto pt-2">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-600 to-amber-500 flex items-center justify-center text-white font-bold text-xs shadow-md shadow-amber-600/20">
-            <Utensils className="w-4 h-4" />
+          <div className="w-8 h-8 rounded-xl bg-white border border-emerald-500/40 flex items-center justify-center overflow-hidden p-0.5 shadow-md">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="Biryani Badshah" className="w-full h-full object-contain" />
           </div>
-          <span className="font-bold text-sm tracking-tight text-white">ReviewPulse</span>
+          <div>
+            <span className="font-onstage font-bruce font-black text-sm tracking-wide text-white uppercase block leading-none">Biryani Badshah</span>
+            <span className="font-script text-[10px] text-emerald-400 block leading-none mt-0.5">A Family Restaurant</span>
+          </div>
         </div>
 
         <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-rose-500/15 text-rose-400 border border-rose-500/30 flex items-center gap-1.5">

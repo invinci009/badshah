@@ -860,6 +860,7 @@ export interface ApplyRedemptionInput {
   customerPhone: string
   rewardId: string
   subtotalPaise: number
+  orderItemIds?: string[]
 }
 
 export interface ApplyRedemptionResult {
@@ -896,6 +897,14 @@ export async function applyRedemptionForOrder(input: ApplyRedemptionInput): Prom
     if (liveRewardData.endAt && new Date(liveRewardData.endAt).getTime() < now.getTime()) throw new Error('REWARD_EXPIRED')
     if (liveRewardData.stock !== null && liveRewardData.stock !== undefined && liveRewardData.stock <= 0) throw new Error('OUT_OF_STOCK')
     if (input.subtotalPaise < liveRewardData.minOrderPaise) throw new Error('MIN_ORDER')
+    if (
+      Array.isArray(liveRewardData.applicableItemIds) &&
+      liveRewardData.applicableItemIds.length > 0 &&
+      input.orderItemIds &&
+      !input.orderItemIds.some((id) => liveRewardData.applicableItemIds.includes(id))
+    ) {
+      throw new Error('ITEM_NOT_APPLICABLE')
+    }
 
     const account = accSnap.exists ? (accSnap.data() as LoyaltyAccount) : null
     if (!account || !customerVerified) throw new Error('NOT_VERIFIED')

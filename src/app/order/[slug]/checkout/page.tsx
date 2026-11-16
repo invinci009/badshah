@@ -485,11 +485,26 @@ export default function CheckoutPage() {
   return (
     <div className="min-h-screen bg-[#faf8f5] text-stone-900 pb-10">
       <header className="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-stone-200 px-3 py-2.5">
-        <div className="flex items-center gap-2 max-w-lg mx-auto">
+        <div className="flex items-center gap-2.5 max-w-lg mx-auto">
           <Link href={menuHref} className="p-2 rounded-lg hover:bg-stone-100 transition-colors" aria-label="Back to menu">
             <ArrowLeft className="w-4 h-4" />
           </Link>
-          <h1 className="font-extrabold text-base">Checkout{tableLabel ? ` • ${formatTableDisplay(tableLabel)}` : ''}</h1>
+          <div className="w-7 h-7 rounded-lg overflow-hidden border border-emerald-400 bg-white shrink-0 p-0.5">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="Biryani Badshah" className="w-full h-full object-contain" />
+          </div>
+          <div>
+            <div className="flex items-center gap-1.5 leading-none">
+              <span className="font-onstage font-bruce font-black text-xs uppercase tracking-wide text-stone-900">
+                BIRYANI BADSHAH
+              </span>
+              <span className="text-xs text-stone-400 font-bold">•</span>
+              <span className="font-heading font-bold text-xs text-stone-700">
+                Checkout{tableLabel ? ` (${formatTableDisplay(tableLabel)})` : ''}
+              </span>
+            </div>
+            <span className="font-script text-[10px] text-emerald-800 leading-none mt-0.5 block">A Family Restaurant</span>
+          </div>
         </div>
       </header>
 
@@ -690,7 +705,7 @@ export default function CheckoutPage() {
           </section>
         ) : (
           /* VIP Member Status Card */
-          <section className="p-5 rounded-3xl bg-gradient-to-br from-[#8a0214] via-[#a31621] to-[#b91c1c] text-white border border-amber-400/40 shadow-xl shadow-red-950/20 space-y-3.5 animate-in fade-in slide-in-from-bottom-3 duration-300 relative overflow-hidden">
+          <section className="p-5 rounded-3xl bg-gradient-to-br from-[#0d3b1e] via-[#1a6234] to-[#0a2e16] text-white border border-amber-400/40 shadow-xl shadow-emerald-950/20 space-y-3.5 animate-in fade-in slide-in-from-bottom-3 duration-300 relative overflow-hidden">
             <Sparkles className="absolute -right-3 -top-3 w-28 h-28 text-white/10 pointer-events-none" />
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-black text-amber-200 uppercase tracking-widest flex items-center gap-1.5">

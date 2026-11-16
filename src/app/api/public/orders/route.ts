@@ -249,6 +249,15 @@ export async function POST(request: NextRequest) {
     // order's possible award is NOT spendable here by design).
     let redemption: Awaited<ReturnType<typeof applyRedemptionForOrder>> | null = null
     if (input.redeemRewardId && loyaltyCustomerPhone) {
+      // Security: Customer MUST have an active verified session matching their phone number
+      // to redeem rewards and spend points. Anonymous or unverified callers cannot spend points.
+      if (!session || !session.verified || session.customerId !== loyaltyCustomerPhone) {
+        return NextResponse.json(
+          { error: 'Please log in to your VIP account to redeem rewards.', code: 'AUTH_REQUIRED_FOR_REDEMPTION' },
+          { status: 401 }
+        )
+      }
+
       const cfg = await getLoyaltyConfig().catch(() => null)
       if (!cfg || !cfg.enabled) {
         return NextResponse.json({ error: 'The loyalty program is currently paused', code: 'LOYALTY_DISABLED' }, { status: 409 })
@@ -261,6 +270,7 @@ export async function POST(request: NextRequest) {
           customerPhone: loyaltyCustomerPhone,
           rewardId: input.redeemRewardId,
           subtotalPaise: quote.subtotalPaise,
+          orderItemIds: input.items.map((line) => line.itemId),
         })
       } catch (e) {
         const code = e instanceof Error ? e.message : 'REDEEM_FAILED'
@@ -274,6 +284,7 @@ export async function POST(request: NextRequest) {
           NOT_ENOUGH_POINTS: 'Not enough points for this reward',
           NOT_VERIFIED: 'Verify your account to redeem rewards',
           CUSTOMER_LIMIT: 'You have already claimed this reward the maximum number of times',
+          ITEM_NOT_APPLICABLE: 'Your order does not contain an item eligible for this reward',
           LOYALTY_DISABLED: 'The loyalty program is currently paused',
         }
         return NextResponse.json(
