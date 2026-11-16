@@ -5,8 +5,9 @@ import { getSessionFromRequest } from '@/lib/firebase/auth'
 function csvCell(v: unknown): string {
   let s = String(v ?? '')
   // Prevent CSV Formula Injection (CWE-1236):
-  // Disarm executable formulas starting with '=', '+', '-', '@', '\t', or '\r'
-  if (/^[=+\-@\t\r]/.test(s)) {
+  // Disarm executable formulas starting with '=', '+', '-', '@', '\t', '\r', '%', or '|' even after leading whitespace
+  const trimmed = s.trimStart()
+  if (/^[=+\-@\t\r%|]/.test(trimmed)) {
     s = `'${s}`
   }
   return `"${s.replace(/"/g, '""')}"`

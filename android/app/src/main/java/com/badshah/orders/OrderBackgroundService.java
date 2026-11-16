@@ -59,12 +59,20 @@ public class OrderBackgroundService extends Service {
         Notification notification = buildForegroundNotification();
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(FOREGROUND_NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+                startForeground(
+                    FOREGROUND_NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                );
             } else {
                 startForeground(FOREGROUND_NOTIFICATION_ID, notification);
             }
-        } catch (Exception e) {
-            e.printStackTrace();
+        } catch (Throwable t) {
+            t.printStackTrace();
+            try {
+                // Guaranteed fallback to untyped foreground service if device rejects typed FGS
+                startForeground(FOREGROUND_NOTIFICATION_ID, notification);
+            } catch (Throwable ignored) {}
         }
 
         // 2. Keep CPU active so voice announcements & background poller run when screen is off
@@ -156,6 +164,18 @@ public class OrderBackgroundService extends Service {
         }
     }
 
+    private static void acquireTempWakeLock(Context context, long timeoutMs) {
+        if (context == null) return;
+        try {
+            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                PowerManager.WakeLock lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BadshahOrders:AlertWakeLock");
+                lock.setReferenceCounted(false);
+                lock.acquire(timeoutMs);
+            }
+        } catch (Exception ignored) {}
+    }
+
     private void createNotificationChannels() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager manager = getSystemService(NotificationManager.class);
@@ -210,14 +230,22 @@ public class OrderBackgroundService extends Service {
             PendingIntent.FLAG_UPDATE_CURRENT | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0)
         );
 
-        return new NotificationCompat.Builder(this, BG_CHANNEL_ID)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, BG_CHANNEL_ID)
             .setContentTitle("Badshah Restaurant Orders")
             .setContentText("पृष्ठभूमि में आर्डर व आवाज़ अलर्ट चालू है (Listening in background)")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build();
+            .setPriority(NotificationCompat.PRIORITY_LOW);
+
+        try {
+            android.graphics.Bitmap largeIcon = android.graphics.BitmapFactory.decodeResource(getResources(), R.mipmap.ic_launcher);
+            if (largeIcon != null) {
+                builder.setLargeIcon(largeIcon);
+            }
+        } catch (Exception ignored) {}
+
+        return builder.build();
     }
 
     /**
@@ -258,47 +286,46 @@ public class OrderBackgroundService extends Service {
                      ((itemsSummary != null && !itemsSummary.trim().isEmpty()) ? "🍽️ आइटम: " + itemsSummary + "\n" : "") +
                      "डैशबोर्ड खोलने के लिए टैप करें");
 
-        android.net.Uri soundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION);
-        Notification notification = new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(contentText)
             .setStyle(bigStyle)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setSound(soundUri)
-            .setVibrate(new long[]{0, 350, 150, 350})
             .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-            .build();
+            .setContentIntent(pendingIntent);
 
+        try {
+            android.graphics.Bitmap largeIcon = android.graphics.BitmapFactory.decodeResource(context.getResources(), R.mipmap.ic_launcher);
+            if (largeIcon != null) {
+                builder.setLargeIcon(largeIcon);
+            }
+        } catch (Exception ignored) {}
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            android.net.Uri soundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION);
+            builder.setSound(soundUri);
+            builder.setVibrate(new long[]{0, 350, 150, 350});
+        }
+
+        Notification notification = builder.build();
         int alertNotifId = (int) (System.currentTimeMillis() % 100000) + 100;
         manager.notify(alertNotifId, notification);
 
-        // Hardware vibration fallback directly via Vibrator service
-        try {
-            android.os.Vibrator v = (android.os.Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
-            if (v != null && v.hasVibrator()) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    v.vibrate(android.os.VibrationEffect.createWaveform(new long[]{0, 350, 150, 350}, -1));
-                } else {
+        // Hardware vibration fallback only on pre-Oreo Android (Oreo+ channels manage vibration)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            try {
+                android.os.Vibrator v = (android.os.Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+                if (v != null && v.hasVibrator()) {
                     v.vibrate(new long[]{0, 350, 150, 350}, -1);
                 }
-            }
-        } catch (Exception ignored) {}
+            } catch (Exception ignored) {}
+        }
 
-        // Safe short CPU wake lock during audio announcement (avoids screen lock deadlocks)
-        try {
-            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-            if (pm != null) {
-                PowerManager.WakeLock cpuLock = pm.newWakeLock(
-                    PowerManager.PARTIAL_WAKE_LOCK,
-                    "BadshahOrders:OrderWakeAlert"
-                );
-                cpuLock.acquire(4000);
-            }
-        } catch (Exception ignored) {}
+        // Safe non-blocking CPU wake lock during audio announcement (avoids lock stacking & leaks)
+        acquireTempWakeLock(context, 4000);
 
         // Dictate items out loud via Native Android TTS
         if (speechAnnouncement != null && !speechAnnouncement.trim().isEmpty()) {
@@ -365,47 +392,46 @@ public class OrderBackgroundService extends Service {
                      (note != null && !note.trim().isEmpty() ? "📝 नोट: " + note.trim() + "\n" : "") +
                      "डैशबोर्ड खोलने के लिए टैप करें");
 
-        android.net.Uri soundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION);
-        Notification notification = new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(contentText)
             .setStyle(bigStyle)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setPriority(NotificationCompat.PRIORITY_MAX)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_EVENT)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setSound(soundUri)
-            .setVibrate(new long[]{0, 350, 150, 350})
             .setAutoCancel(true)
-            .setContentIntent(pendingIntent)
-            .build();
+            .setContentIntent(pendingIntent);
 
+        try {
+            android.graphics.Bitmap largeIcon = android.graphics.BitmapFactory.decodeResource(context.getResources(), R.mipmap.ic_launcher);
+            if (largeIcon != null) {
+                builder.setLargeIcon(largeIcon);
+            }
+        } catch (Exception ignored) {}
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            android.net.Uri soundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION);
+            builder.setSound(soundUri);
+            builder.setVibrate(new long[]{0, 350, 150, 350});
+        }
+
+        Notification notification = builder.build();
         int alertNotifId = (int) (System.currentTimeMillis() % 100000) + 200;
         manager.notify(alertNotifId, notification);
 
-        // Hardware vibration fallback directly via Vibrator service
-        try {
-            android.os.Vibrator v = (android.os.Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
-            if (v != null && v.hasVibrator()) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    v.vibrate(android.os.VibrationEffect.createWaveform(new long[]{0, 350, 150, 350}, -1));
-                } else {
+        // Hardware vibration fallback only on pre-Oreo Android (Oreo+ channels manage vibration)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            try {
+                android.os.Vibrator v = (android.os.Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+                if (v != null && v.hasVibrator()) {
                     v.vibrate(new long[]{0, 350, 150, 350}, -1);
                 }
-            }
-        } catch (Exception ignored) {}
+            } catch (Exception ignored) {}
+        }
 
-        // Safe short CPU wake lock during audio announcement (avoids screen lock deadlocks)
-        try {
-            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-            if (pm != null) {
-                PowerManager.WakeLock cpuLock = pm.newWakeLock(
-                    PowerManager.PARTIAL_WAKE_LOCK,
-                    "BadshahOrders:ServiceWakeAlert"
-                );
-                cpuLock.acquire(4000);
-            }
-        } catch (Exception ignored) {}
+        // Safe non-blocking CPU wake lock during audio announcement (avoids lock stacking & leaks)
+        acquireTempWakeLock(context, 4000);
 
         // Dictate service alert out loud via Native Android TTS
         if (speechAnnouncement != null && !speechAnnouncement.trim().isEmpty()) {

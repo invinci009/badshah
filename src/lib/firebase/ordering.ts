@@ -58,8 +58,6 @@ export interface TableQrToken {
   createdAt: string
 }
 
-const syncingStaleTables = new Set<string>()
-
 export async function getTables(includeInactive = true): Promise<DiningTable[]> {
   const tables = await getCached('tables:all', 60 * 60 * 1000, async () => {
     const q = getDb().collection('diningTables').orderBy('label', 'asc')
@@ -80,28 +78,21 @@ export async function getTables(includeInactive = true): Promise<DiningTable[]> 
       const threshold = t.state === 'cleaning' ? 15 * 60 * 1000 : 2 * 60 * 60 * 1000
 
       if (ageMs > threshold) {
-        if (!syncingStaleTables.has(t.id)) {
-          staleTableIds.push(t.id)
-          syncingStaleTables.add(t.id)
-        }
-        t.state = 'available' as TableState
+        staleTableIds.push(t.id)
         return { ...t, state: 'available' as TableState }
       }
     }
     return t
   })
 
-  // Asynchronously sync stale tables in Firestore without blocking read response or thrashing memory cache
+  // Asynchronously sync stale tables in Firestore without blocking read response
   if (staleTableIds.length > 0) {
     Promise.allSettled(
-      staleTableIds.map(async (id) => {
-        try {
-          await getDb().doc(`diningTables/${id}`).update({ state: 'available', updatedAt: serverNow() })
-        } finally {
-          syncingStaleTables.delete(id)
-        }
-      })
+      staleTableIds.map((id) =>
+        getDb().doc(`diningTables/${id}`).update({ state: 'available', updatedAt: serverNow() })
+      )
     ).catch(() => {})
+    invalidateCache('tables:all')
   }
 
   return includeInactive ? processed : processed.filter((t) => t.active)
@@ -611,14 +602,14 @@ export async function getOrderByIdempotencyKey(key: string): Promise<Order | nul
 
 export async function getOrder(id: string): Promise<Order | null> {
   const now = Date.now()
-  // Fast path 1: check in-memory active orders cache ONLY IF fresh (< 10s)
-  if (activeOrdersCache.fetchedAt > 0 && now - activeOrdersCache.fetchedAt < 10000) {
+  // Fast path 1: check in-memory active orders cache ONLY IF fresh (< 4s)
+  if (activeOrdersCache.fetchedAt > 0 && now - activeOrdersCache.fetchedAt < 4000) {
     const inMemory = activeOrdersCache.orders.find((o) => o.id === id)
     if (inMemory) return inMemory
   }
 
-  // Fast path 2: cached order read with request coalescing (30s TTL, event-invalidated on status/payment changes)
-  return getCached(`order:${id}`, 30000, async () => {
+  // Fast path 2: cached order read with request coalescing (3s TTL)
+  return getCached(`order:${id}`, 3000, async () => {
     const snap = await getDb().doc(`orders/${id}`).get()
     if (!snap.exists) return null
     return { id: snap.id, ...snap.data() } as Order
@@ -672,14 +663,13 @@ export function invalidateActiveOrdersCache(): void {
 }
 
 export function getActiveOrdersEtag(): string {
+  if (activeOrdersCache.fetchedAt === 0) return ''
   return activeOrdersCache.etag || computeOrdersEtag(activeOrdersCache.orders)
 }
 
 export async function getOrders(limit = 100): Promise<Order[]> {
-  return getCached(`orders:all:${limit}`, 8000, async () => {
-    const snap = await getDb().collection('orders').orderBy('createdAt', 'desc').limit(limit).get()
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
-  })
+  const snap = await getDb().collection('orders').orderBy('createdAt', 'desc').limit(limit).get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
 }
 
 /** 
@@ -688,7 +678,7 @@ export async function getOrders(limit = 100): Promise<Order[]> {
  */
 export async function getActiveOrders(limit = 50, forceFresh = false): Promise<Order[]> {
   const now = Date.now()
-  const TTL_MS = 4000 // 4 seconds: shields Firestore against high-frequency polling bursts
+  const TTL_MS = 25000 // 25 seconds: shields Firestore against polling spikes; invalidated instantly on any order mutation
 
   // 1. Fast-path: Return fresh in-memory data if valid and not forced
   if (
@@ -737,25 +727,23 @@ export async function getActiveOrders(limit = 50, forceFresh = false): Promise<O
   return result.slice(0, limit)
 }
 
-/** Query orders by specific fulfilment status (e.g. SERVED, CANCELLED) with indexing & short coalesced cache. */
+/** Query orders by specific fulfilment status (e.g. SERVED, CANCELLED) with indexing. */
 export async function getOrdersByFulfilment(status: FulfilmentStatus, limit = 50): Promise<Order[]> {
-  return getCached(`orders:status:${status}:${limit}`, 8000, async () => {
-    const snap = await getDb()
-      .collection('orders')
-      .where('fulfilment', '==', status)
-      .limit(limit)
-      .get()
-    const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
-    docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-    return docs.slice(0, limit)
-  })
+  const snap = await getDb()
+    .collection('orders')
+    .where('fulfilment', '==', status)
+    .limit(limit)
+    .get()
+  const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Order)
+  docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+  return docs.slice(0, limit)
 }
 
 /** Efficient query for active orders at a specific table (reads max 5 docs instead of entire history). */
 export async function getActiveOrdersByTable(tableId: string): Promise<Order[]> {
   const now = Date.now()
   // If active orders cache is warm, filter directly from memory for 0 Firestore reads!
-  if (activeOrdersCache.fetchedAt > 0 && now - activeOrdersCache.fetchedAt < 10000) {
+  if (activeOrdersCache.fetchedAt > 0 && now - activeOrdersCache.fetchedAt < 4000) {
     return activeOrdersCache.orders
       .filter((o) => o.tableId === tableId)
       .slice(0, 5)
@@ -1278,6 +1266,7 @@ export function invalidateActiveServiceRequestsCache(): void {
 }
 
 export function getActiveServiceRequestsEtag(): string {
+  if (activeServiceRequestsCache.fetchedAt === 0) return ''
   return activeServiceRequestsCache.etag || computeServiceRequestsEtag(activeServiceRequestsCache.requests)
 }
 
@@ -1307,7 +1296,7 @@ export async function createServiceRequest(data: {
 
 export async function getServiceRequests(status?: string, limit = 50, forceFresh = false): Promise<ServiceRequest[]> {
   const now = Date.now()
-  const TTL_MS = 6000 // 6 seconds in-memory coalescing
+  const TTL_MS = 25000 // 25 seconds in-memory coalescing; invalidated instantly on any create/update
 
   if (status === 'OPEN' || !status) {
     if (!forceFresh && activeServiceRequestsCache.fetchedAt > 0 && now - activeServiceRequestsCache.fetchedAt < TTL_MS) {
@@ -1350,7 +1339,7 @@ export async function getServiceRequests(status?: string, limit = 50, forceFresh
 
   // Other statuses (RESOLVED, CANCELLED, etc.)
   const cacheKey = status ? `serviceRequests:${status}` : 'serviceRequests:all'
-  const list = await getCached(cacheKey, 15000, async () => {
+  const list = await getCached(cacheKey, 45000, async () => {
     const snap = await getDb()
       .collection('serviceRequests')
       .where('status', '==', status)

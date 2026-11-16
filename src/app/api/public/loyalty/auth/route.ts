@@ -234,19 +234,16 @@ export async function POST(request: NextRequest) {
       if (!phone) return NextResponse.json({ error: 'Invalid mobile number.' }, { status: 400 })
       const account = await getCustomerAccount(phone)
       if (!account) return NextResponse.json({ error: 'Account not found. Please sign up.' }, { status: 404 })
-      if (account.verified) {
-        // Already verified — proceed as login.
-        const token = await createCustomerSessionToken({ customerId: phone, name: account.name, verified: true })
-        await updateCustomerLogin(phone)
-        const res = NextResponse.json({ success: true, verified: true, name: account.name }, { status: 200 })
-        res.cookies.set(CUSTOMER_SESSION_COOKIE, token, customerSessionCookieOptions())
-        return res
-      }
+
+      // Security hardening: Strictly verify the OTP code before issuing a session cookie.
+      // Never bypass OTP verification based on account state.
       const ok = await verifyOtp(phone, parsed.data.code, 'signup')
       if (!ok) {
         return NextResponse.json({ error: 'Invalid or expired verification code.' }, { status: 401 })
       }
-      await markCustomerVerified(phone)
+      if (!account.verified) {
+        await markCustomerVerified(phone)
+      }
       await ensureLoyaltyAccount(phone)
       const token = await createCustomerSessionToken({ customerId: phone, name: account.name, verified: true })
       await updateCustomerLogin(phone)

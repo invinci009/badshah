@@ -97,9 +97,11 @@ export async function rateLimitMiddleware(request: NextRequest): Promise<NextRes
 
   const { pathname } = request.nextUrl
   const method = request.method
+  // Prioritize Cloudflare's authenticated CF-Connecting-IP to prevent IP spoofing via forged X-Forwarded-For
   const ip =
+    request.headers.get('cf-connecting-ip')?.trim() ||
+    request.headers.get('x-real-ip')?.trim() ||
     request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    request.headers.get('x-real-ip') ||
     'client'
 
   // Extract session token or table identifier to prevent restaurant-wide NAT Wi-Fi false throttling

@@ -106,7 +106,7 @@ test('Cloudflare Security Audit Skill — Vulnerability Patch Verification', asy
     const exportPath = path.resolve(root, 'src/app/api/business/order-reports/export/route.ts')
     const content = fs.readFileSync(exportPath, 'utf8')
 
-    assert.ok(content.includes('/^[=+\\-@\\t\\r]/'), 'Disarms spreadsheet formula triggers')
+    assert.ok(content.includes('trimmed') && content.includes('/^[=+\\-@\\t\\r%|]/'), 'Disarms spreadsheet formula triggers with whitespace handling')
   })
 
   await t.test('9. HTTP Header Splitting & CRLF Prevention on QR Routes', () => {
@@ -144,5 +144,42 @@ test('Cloudflare Security Audit Skill — Vulnerability Patch Verification', asy
     assert.ok(routeContent.includes('status: 304'), 'Route returns 304 on ETag match')
     assert.ok(orderingContent.includes('computeServiceRequestsEtag'), 'Ordering lib has computeServiceRequestsEtag')
     assert.ok(orderingContent.includes('invalidateActiveServiceRequestsCache'), 'Ordering lib has invalidateActiveServiceRequestsCache')
+  })
+
+  await t.test('12. Cloudflare Security Audit — Factor Verification & Account Takeover Defense', () => {
+    const authRoutePath = path.resolve(root, 'src/app/api/public/loyalty/auth/route.ts')
+    const authContent = fs.readFileSync(authRoutePath, 'utf8')
+
+    // Must never bypass verifyOtp on account.verified
+    assert.ok(
+      !authContent.includes("if (account.verified) {\n        // Already verified"),
+      'Eliminated premature session issuance on verified accounts'
+    )
+    assert.ok(authContent.includes('await verifyOtp(phone, parsed.data.code'), 'Enforces OTP verification before session issuance')
+  })
+
+  await t.test('13. Table QR Host Header Poisoning & Open Redirect Defense', () => {
+    const tableQrPath = path.resolve(root, 'src/app/api/business/tables/qr/route.ts')
+    const tableIdQrPath = path.resolve(root, 'src/app/api/business/tables/[id]/qr/route.ts')
+    const confirmPath = path.resolve(root, 'src/app/auth/confirm/route.ts')
+
+    const tableQrContent = fs.readFileSync(tableQrPath, 'utf8')
+    const tableIdQrContent = fs.readFileSync(tableIdQrPath, 'utf8')
+    const confirmContent = fs.readFileSync(confirmPath, 'utf8')
+
+    assert.ok(tableQrContent.includes('isAllowedHost'), 'Validates Host header on table QR generation')
+    assert.ok(tableIdQrContent.includes('isAllowedHost'), 'Validates Host header on table ID QR generation')
+    assert.ok(confirmContent.includes("!rawNext.startsWith('//')"), 'Prevents protocol-relative open redirect')
+  })
+
+  await t.test('14. Cloudflare Header Prioritization & Strict Transport Security (HSTS)', () => {
+    const rateLimitPath = path.resolve(root, 'src/lib/middleware/rate-limit.ts')
+    const nextConfigPath = path.resolve(root, 'next.config.ts')
+
+    const rateLimitContent = fs.readFileSync(rateLimitPath, 'utf8')
+    const nextConfigContent = fs.readFileSync(nextConfigPath, 'utf8')
+
+    assert.ok(rateLimitContent.includes("cf-connecting-ip"), 'Prioritizes Cloudflare CF-Connecting-IP against spoofing')
+    assert.ok(nextConfigContent.includes('Strict-Transport-Security'), 'Enforces HSTS with preload')
   })
 })

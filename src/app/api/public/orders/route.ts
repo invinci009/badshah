@@ -30,7 +30,12 @@ import { computeQuote } from '@/lib/ordering/rules.mjs'
 // POST /api/public/orders — server-authoritative order creation.
 // Validates restaurant, table token, phone, items, options; rechecks
 // availability/prices; computes money server-side; idempotent by key.
-const inFlightOrderCreations = new Map<string, Promise<NextResponse>>()
+interface InFlightResponsePayload {
+  status: number
+  body: unknown
+}
+
+const inFlightOrderCreations = new Map<string, Promise<InFlightResponsePayload>>()
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,11 +49,13 @@ export async function POST(request: NextRequest) {
     // In-flight concurrency lock: if identical idempotency key is currently processing, coalesce onto existing promise
     const inFlight = inFlightOrderCreations.get(input.idempotencyKey)
     if (inFlight) {
-      return await inFlight
+      const cached = await inFlight
+      return NextResponse.json(cached.body, { status: cached.status })
     }
 
-    const creationPromise = (async (): Promise<NextResponse> => {
-      // 1. Restaurant (campaign slug must exist + active).
+    const creationPromise = (async (): Promise<InFlightResponsePayload> => {
+      const innerRes = await (async (): Promise<NextResponse> => {
+        // 1. Restaurant (campaign slug must exist + active).
       const campaign = await getCampaignBySlug(input.slug).catch(() => null)
       if (!campaign || !campaign.active) {
         return NextResponse.json({ error: 'Ordering is not available for this link' }, { status: 404 })
@@ -428,12 +435,16 @@ export async function POST(request: NextRequest) {
       },
       { status: 201 }
     )
+      })()
+
+      const jsonBody = await innerRes.json().catch(() => ({}))
+      return { status: innerRes.status, body: jsonBody }
     })()
 
     inFlightOrderCreations.set(input.idempotencyKey, creationPromise)
     try {
       const response = await creationPromise
-      return response
+      return NextResponse.json(response.body, { status: response.status })
     } finally {
       setTimeout(() => inFlightOrderCreations.delete(input.idempotencyKey), 10000)
     }

@@ -30,14 +30,20 @@ public class MainActivity extends BridgeActivity {
         OrderBackgroundService.setAppContext(this);
         OrderBackgroundService.initTTS(this);
 
-        // Start foreground background service to keep orders active in background
+        // Start foreground background service safely once window is attached and rendered
         try {
-            Intent serviceIntent = new Intent(this, OrderBackgroundService.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(serviceIntent);
-            } else {
-                startService(serviceIntent);
-            }
+            getWindow().getDecorView().post(() -> {
+                try {
+                    Intent serviceIntent = new Intent(MainActivity.this, OrderBackgroundService.class);
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(serviceIntent);
+                    } else {
+                        startService(serviceIntent);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            });
         } catch (Exception e) {
             e.printStackTrace();
         }
