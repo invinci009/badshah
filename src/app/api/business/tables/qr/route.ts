@@ -12,7 +12,8 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url)
   const tableId = searchParams.get('tableId')
-  const slug = searchParams.get('slug') || 'order'
+  const rawSlug = searchParams.get('slug') || 'order'
+  const slug = rawSlug.trim().replace(/[^a-zA-Z0-9_-]/g, '') || 'order'
   const format = searchParams.get('format') || 'png'
 
   if (!tableId) return NextResponse.json({ error: 'tableId is required' }, { status: 400 })

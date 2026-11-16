@@ -3,28 +3,47 @@ import QRCode from 'qrcode'
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
-  const slug = searchParams.get('slug')
+  const rawSlug = searchParams.get('slug')
   const format = searchParams.get('format') || 'png' // 'png' | 'svg'
 
-  if (!slug) {
+  if (!rawSlug) {
     return NextResponse.json({ error: 'Slug parameter is required' }, { status: 400 })
+  }
+
+  // Sanitize slug to safe characters to prevent CRLF injection in headers & URL confusion
+  const slug = rawSlug.trim().replace(/[^a-zA-Z0-9_-]/g, '')
+  if (!slug) {
+    return NextResponse.json({ error: 'Invalid slug parameter' }, { status: 400 })
   }
 
   const type = searchParams.get('type') // 'feedback' | 'special' | 'menu'
   const customPath = searchParams.get('path')
 
-  const proto = request.headers.get('x-forwarded-proto') || (process.env.NODE_ENV === 'production' ? 'https' : 'http')
-  const host = request.headers.get('x-forwarded-host') || request.headers.get('host') || process.env.APP_DOMAIN || 'localhost:3000'
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || `${proto}://${host}`
+  // Resolve safe base URL with host allowlist
+  let baseUrl = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '')
+  if (!baseUrl) {
+    const proto = request.headers.get('x-forwarded-proto') || (process.env.NODE_ENV === 'production' ? 'https' : 'http')
+    const host = (request.headers.get('x-forwarded-host') || request.headers.get('host') || process.env.APP_DOMAIN || 'localhost:3000').toLowerCase().trim()
+    const isAllowed =
+      host === 'localhost:3000' ||
+      host === '127.0.0.1:3000' ||
+      host.endsWith('.vercel.app') ||
+      (process.env.APP_DOMAIN && host === process.env.APP_DOMAIN.toLowerCase().trim())
+    baseUrl = isAllowed ? `${proto}://${host}` : (process.env.APP_DOMAIN ? `https://${process.env.APP_DOMAIN}` : 'http://localhost:3000')
+  }
   
-  let targetUrl = `${baseUrl.replace(/\/$/, '')}/r/${slug}`
+  let targetUrl = `${baseUrl}/r/${slug}`
   let qrColor = '#0f172a'
 
   if (type === 'special' || customPath === 'special-menu') {
-    targetUrl = `${baseUrl.replace(/\/$/, '')}/order/${slug}/special-menu`
+    targetUrl = `${baseUrl}/order/${slug}/special-menu`
     qrColor = '#1a6234' // Brand emerald green
   } else if (customPath) {
-    targetUrl = `${baseUrl.replace(/\/$/, '')}/${customPath.replace(/^\//, '')}`
+    const cleanPath = customPath.replace(/^\/+/, '').trim()
+    // Disallow protocol-relative URLs (//) and path traversal
+    if (!cleanPath.startsWith('http:') && !cleanPath.startsWith('https:') && !cleanPath.includes('//') && !cleanPath.includes('..')) {
+      targetUrl = `${baseUrl}/${cleanPath}`
+    }
   }
 
   try {

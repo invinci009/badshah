@@ -3,7 +3,12 @@ import { getOrders } from '@/lib/firebase/ordering'
 import { getSessionFromRequest } from '@/lib/firebase/auth'
 
 function csvCell(v: unknown): string {
-  const s = String(v ?? '')
+  let s = String(v ?? '')
+  // Prevent CSV Formula Injection (CWE-1236):
+  // Disarm executable formulas starting with '=', '+', '-', '@', '\t', or '\r'
+  if (/^[=+\-@\t\r]/.test(s)) {
+    s = `'${s}`
+  }
   return `"${s.replace(/"/g, '""')}"`
 }
 

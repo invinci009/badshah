@@ -422,19 +422,39 @@ export async function storeOtp(phone: string, purpose: 'signup' | 'login'): Prom
 export async function verifyOtp(phone: string, code: string, purpose: 'signup' | 'login'): Promise<boolean> {
   const db = getDb()
   const ref = db.doc(`customerOtps/${phone}`)
-  const snap = await ref.get()
-  if (!snap.exists) return false
-  const rec = snap.data() as OtpRecord
-  if (rec.purpose !== purpose) return false
-  if (new Date(rec.expiresAt).getTime() < Date.now()) return false
-  if (rec.attempts >= OTP_MAX_ATTEMPTS) return false
-  const presentedHash = crypto.createHash('sha256').update(code.replace(/\D/g, '')).digest('hex')
-  if (presentedHash !== rec.codeHash) {
-    await ref.update({ attempts: rec.attempts + 1 }).catch(() => {})
-    return false
-  }
-  await ref.delete().catch(() => {})
-  return true
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists) return false
+    const rec = snap.data() as OtpRecord
+    if (rec.purpose !== purpose) return false
+    if (new Date(rec.expiresAt).getTime() < Date.now()) {
+      tx.delete(ref)
+      return false
+    }
+    if (rec.attempts >= OTP_MAX_ATTEMPTS) {
+      tx.delete(ref)
+      return false
+    }
+
+    const presentedHash = crypto.createHash('sha256').update(code.replace(/\D/g, '')).digest('hex')
+    const a = Buffer.from(presentedHash, 'hex')
+    const b = Buffer.from(rec.codeHash, 'hex')
+    const isMatch = a.length === b.length && crypto.timingSafeEqual(a, b)
+
+    if (!isMatch) {
+      const nextAttempts = (rec.attempts || 0) + 1
+      if (nextAttempts >= OTP_MAX_ATTEMPTS) {
+        tx.delete(ref)
+      } else {
+        tx.update(ref, { attempts: nextAttempts })
+      }
+      return false
+    }
+
+    tx.delete(ref)
+    return true
+  }).catch(() => false)
 }
 
 /** Read-only OTP record (used by the API for resend cooldown checks). */

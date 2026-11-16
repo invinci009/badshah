@@ -108,7 +108,15 @@ export async function rateLimitMiddleware(request: NextRequest): Promise<NextRes
   let category = 'general'
   const windowMs = 60_000 // 1 minute
 
-  if (pathname.includes('/orders') && method === 'POST') {
+  if (pathname.startsWith('/api/auth/login') || pathname.startsWith('/api/auth/reset-password') || pathname.startsWith('/api/auth/change-password')) {
+    // Admin login, password reset, and change-password brute-force defense
+    maxRequests = 10
+    category = 'admin-auth'
+  } else if (pathname.startsWith('/api/auth/')) {
+    // General auth actions (session check, logout)
+    maxRequests = 60
+    category = 'auth-general'
+  } else if (pathname.includes('/orders') && method === 'POST') {
     // Order creation: limit to 25 per minute per IP to prevent spam submissions
     maxRequests = 25
     category = 'order-create'

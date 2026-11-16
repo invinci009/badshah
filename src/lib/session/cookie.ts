@@ -1,9 +1,27 @@
 import 'server-only'
+import crypto from 'crypto'
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose'
 import { cookies } from 'next/headers'
 
 const COOKIE_NAME = 'rp_session'
-const getSecret = () => new TextEncoder().encode(process.env.SESSION_COOKIE_SECRET || 'default-dev-secret-32-chars-long-reviewpulse!')
+let cachedSessionSecret: Uint8Array | null = null
+
+function getSecret(): Uint8Array {
+  const explicit = process.env.SESSION_COOKIE_SECRET
+  if (explicit && explicit.length >= 16) {
+    return new TextEncoder().encode(crypto.createHash('sha256').update(explicit).digest('hex'))
+  }
+  const serverPrivate = process.env.FIREBASE_PRIVATE_KEY
+  if (serverPrivate) {
+    return new TextEncoder().encode(
+      crypto.createHash('sha256').update(`${serverPrivate}::rp-session-secret`).digest('hex')
+    )
+  }
+  if (!cachedSessionSecret) {
+    cachedSessionSecret = new TextEncoder().encode(crypto.randomBytes(32).toString('hex'))
+  }
+  return cachedSessionSecret
+}
 
 export interface SessionPayload extends JWTPayload {
   session_id: string

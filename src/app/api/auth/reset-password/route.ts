@@ -22,9 +22,24 @@ export async function POST(request: NextRequest) {
     // actionCodeSettings routes the email link to OUR /reset-password page
     // (with ?oobCode=...) instead of Firebase's default handler, so the new
     // password is set inside this app and verified by Firebase's oobCode.
-    // Origin-based URL keeps localhost + production working (both must be
-    // in Auth → Settings → Authorized domains; localhost is by default).
-    const continueUrl = `${request.nextUrl.origin}/reset-password`
+    // Safe origin resolution: prioritize explicit application URL to protect against Host-Header Poisoning
+    let safeOrigin = (process.env.NEXT_PUBLIC_APP_URL || '').replace(/\/$/, '')
+    if (!safeOrigin) {
+      const host = (request.headers.get('x-forwarded-host') || request.headers.get('host') || '').toLowerCase().trim()
+      const isAllowedHost =
+        host === 'localhost:3000' ||
+        host === '127.0.0.1:3000' ||
+        host.endsWith('.vercel.app') ||
+        (process.env.APP_DOMAIN && host === process.env.APP_DOMAIN.toLowerCase().trim())
+
+      if (isAllowedHost) {
+        const proto = request.headers.get('x-forwarded-proto') || (process.env.NODE_ENV === 'production' ? 'https' : 'http')
+        safeOrigin = `${proto}://${host}`
+      } else {
+        safeOrigin = process.env.APP_DOMAIN ? `https://${process.env.APP_DOMAIN}` : 'http://localhost:3000'
+      }
+    }
+    const continueUrl = `${safeOrigin}/reset-password`
     const auth = getServerAuth()
     await sendPasswordResetEmail(auth, resolvedEmail, {
       url: continueUrl,

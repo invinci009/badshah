@@ -17,13 +17,26 @@ interface CustomerSessionPayload {
   verified: boolean
 }
 
+let cachedEphemeralSecret: Uint8Array | null = null
+
 function getSecret(): Uint8Array {
-  // Preferred: dedicated secret. Fallback: derived from project id so the
-  // feature works out of the box in white-label deployments (per-project
-  // isolation still applies because each client has its own Firebase project).
+  // 1. Explicit dedicated secret
   const explicit = process.env.CUSTOMER_SESSION_SECRET
-  const base = explicit || `${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'reviewpulse'}::loyalty-customer-session`
-  return new TextEncoder().encode(crypto.createHash('sha256').update(base).digest('hex'))
+  if (explicit && explicit.length >= 16) {
+    return new TextEncoder().encode(crypto.createHash('sha256').update(explicit).digest('hex'))
+  }
+  // 2. Server-only private credential derivation (never client-visible)
+  const serverPrivate = process.env.FIREBASE_PRIVATE_KEY || process.env.SESSION_COOKIE_SECRET
+  if (serverPrivate) {
+    return new TextEncoder().encode(
+      crypto.createHash('sha256').update(`${serverPrivate}::loyalty-customer-session`).digest('hex')
+    )
+  }
+  // 3. High-entropy in-memory secret generated on server boot to prevent external token forgery
+  if (!cachedEphemeralSecret) {
+    cachedEphemeralSecret = new TextEncoder().encode(crypto.randomBytes(32).toString('hex'))
+  }
+  return cachedEphemeralSecret
 }
 
 export async function createCustomerSessionToken(payload: CustomerSessionPayload): Promise<string> {
@@ -40,7 +53,7 @@ export async function createCustomerSessionToken(payload: CustomerSessionPayload
 
 export async function verifyCustomerSessionToken(token: string): Promise<CustomerSessionPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, getSecret())
+    const { payload } = await jwtVerify(token, getSecret(), { algorithms: ['HS256'] })
     const customerId = payload['c']
     if (typeof customerId !== 'string' || !/^\d{10}$/.test(customerId)) return null
     return {

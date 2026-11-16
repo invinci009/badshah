@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { signInWithEmailAndPassword } from 'firebase/auth'
 import { getServerAuth } from '@/lib/firebase/server-auth'
 import { getAdminAuth } from '@/lib/firebase/admin'
+import { getSessionFromRequest } from '@/lib/firebase/auth'
 import { z } from 'zod'
 
 const changePasswordSchema = z.object({
@@ -23,26 +24,13 @@ export async function POST(request: NextRequest) {
 
     const { currentPassword, newPassword } = parsed.data
 
-    // Identify the caller from the session cookie (there is no
-    // `auth.currentUser` on the server — never import the client SDK here).
-    const idToken = request.cookies.get('firebase_token')?.value
-    if (!idToken) {
+    // Identify the caller via robust session helper (supports both Firebase session cookies and ID tokens)
+    const user = await getSessionFromRequest(request)
+    if (!user || !user.email) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
     }
 
-    let uid: string
-    let email: string | undefined
-    try {
-      const decoded = await getAdminAuth().verifyIdToken(idToken)
-      uid = decoded.uid
-      email = decoded.email
-    } catch {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-    }
-
-    if (!email) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
-    }
+    const { uid, email } = user
 
     // Verify the current password by signing in with it
     try {
@@ -53,6 +41,13 @@ export async function POST(request: NextRequest) {
 
     // Update password via Admin SDK
     await getAdminAuth().updateUser(uid, { password: newPassword })
+
+    // Invalidate prior sessions upon password rotation (CWE-613 / Cloudflare session invalidation)
+    try {
+      await getAdminAuth().revokeRefreshTokens(uid)
+    } catch (revokeErr) {
+      console.warn('Could not revoke previous refresh tokens:', revokeErr)
+    }
 
     return NextResponse.json({ success: true, message: 'Password updated successfully' })
   } catch (error) {

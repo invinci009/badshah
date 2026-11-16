@@ -1,9 +1,18 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { getSessionFromRequest } from '@/lib/firebase/auth'
+import { getAdminAuth } from '@/lib/firebase/admin'
 
-export async function POST() {
-  // Login happens server-side (see login/route.ts), so the browser holds no
-  // Firebase user session — clearing the session cookie is the full sign-out.
-  // Never import '@/lib/firebase/client' here ('use client' boundary).
+export async function POST(request: NextRequest) {
+  // Revoke session server-side if user is authenticated
+  try {
+    const user = await getSessionFromRequest(request)
+    if (user?.uid) {
+      await getAdminAuth().revokeRefreshTokens(user.uid).catch(() => {})
+    }
+  } catch (err) {
+    console.warn('Logout server-side token revocation warning:', err)
+  }
+
   const response = NextResponse.json({ success: true })
   response.cookies.set('firebase_token', '', {
     httpOnly: true,

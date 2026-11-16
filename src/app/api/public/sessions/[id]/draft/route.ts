@@ -28,10 +28,10 @@ export async function POST(request: NextRequest, { params }: RouteProps) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 })
     }
 
-    // 2. Validate cookie or database existence
+    // 2. Validate session cookie ownership
     const cookie = await getSessionFromCookie()
-    if (cookie && cookie.session_id !== id) {
-      console.warn(`[Draft] Cookie mismatch for session ${id}`)
+    if (!cookie || cookie.session_id !== id) {
+      return NextResponse.json({ error: 'Invalid or expired session' }, { status: 403 })
     }
 
     // 3. Idempotency: Return existing draft if already generated —
@@ -117,6 +117,11 @@ export async function POST(request: NextRequest, { params }: RouteProps) {
 export async function PATCH(request: NextRequest, { params }: RouteProps) {
   try {
     const { id } = await params
+    const cookie = await getSessionFromCookie()
+    if (!cookie || cookie.session_id !== id) {
+      return NextResponse.json({ error: 'Invalid or expired session' }, { status: 403 })
+    }
+
     const body = await request.json().catch(() => ({}))
     const parsed = patchDraftSchema.safeParse(body)
 

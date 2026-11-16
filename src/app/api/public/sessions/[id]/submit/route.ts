@@ -23,10 +23,10 @@ export async function POST(request: NextRequest, { params }: RouteProps) {
       return NextResponse.json({ error: 'Session not found or expired' }, { status: 404 })
     }
 
-    // 2. Validate session cookie (or permit if valid session exists in DB)
+    // 2. Validate session cookie ownership
     const cookie = await getSessionFromCookie()
-    if (cookie && cookie.session_id !== id) {
-      console.warn(`[Submit] Cookie mismatch for session ${id} vs cookie ${cookie.session_id}`)
+    if (!cookie || cookie.session_id !== id) {
+      return NextResponse.json({ error: 'Invalid or expired session' }, { status: 403 })
     }
 
     // 3. Idempotent check: if already completed, return success immediately
