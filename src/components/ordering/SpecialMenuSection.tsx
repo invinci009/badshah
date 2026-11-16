@@ -40,7 +40,7 @@ export const partyPackItems: SpecialPartyItem[] = [
   { id: 'special-meetha-zarda', name: 'Meetha Zarda', price: '₹800', pricePaise: 80000, unit: '1 kg.', veg: true, highlight: 'Royal sweet saffron rice with dry fruits' },
   { id: 'special-chicken-korma', name: 'Chicken Korma', price: '₹600', pricePaise: 60000, unit: '1 kg.', veg: false, highlight: 'Rich Mughlai gravy with tender chicken' },
   { id: 'special-mutton-korma', name: 'Mutton Korma', price: '₹1,200', pricePaise: 120000, unit: '1 kg.', veg: false, highlight: 'Slow-cooked royal mutton gravy' },
-  { id: 'special-chicken-stick-kabab', name: 'Chicken Stick Kabab (Bonless)', price: '₹1,200', pricePaise: 120000, unit: '1 kg.', veg: false, highlight: 'Juicy spiced skewered boneless bites' },
+  { id: 'special-chicken-stick-kabab', name: 'Chicken Stick Kabab (Boneless)', price: '₹1,200', pricePaise: 120000, unit: '1 kg.', veg: false, highlight: 'Juicy spiced skewered boneless bites' },
   { id: 'special-murg-mussallam', name: 'Murg Mussallam', price: '₹650', pricePaise: 65000, unit: 'pcs.', veg: false, highlight: 'Whole stuffed chicken in royal gravy' },
   { id: 'special-mutton-raan-e-arabian', name: 'Mutton Rane-E-Arabian', price: '₹2,500', pricePaise: 250000, unit: 'pcs.', veg: false, highlight: 'Grand slow-roasted Arabian leg of mutton' },
   { id: 'special-baby-naan', name: 'Baby Naan', price: '₹450', pricePaise: 45000, unit: '1 kg.', veg: true, highlight: 'Soft tandoori baby naans' },
