@@ -83,6 +83,7 @@ interface OrderAnnouncerContextType {
   announceOrderDirectly: (order: IncomingOrderInfo) => Promise<void>
   announceServiceDirectly: (service: IncomingServiceRequestInfo) => Promise<void>
   activeOrders: IncomingOrderInfo[]
+  serviceRequests: IncomingServiceRequestInfo[]
   refreshActiveOrders: () => Promise<void>
   isSyncing: boolean
   audioUnlocked: boolean
@@ -123,6 +124,7 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
   )
 
   const [activeOrders, setActiveOrders] = useState<IncomingOrderInfo[]>([])
+  const [serviceRequests, setServiceRequests] = useState<IncomingServiceRequestInfo[]>([])
   const [isSyncing, setIsSyncing] = useState<boolean>(false)
 
   const [engineStatus, setEngineStatus] = useState<VoiceEngineStatus>(() => getVoiceEngineStatus())
@@ -421,9 +423,6 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
         if (typeof window.AndroidTTS.requestNotificationPermission === 'function') {
           window.AndroidTTS.requestNotificationPermission()
         }
-        if (typeof window.AndroidTTS.requestIgnoreBatteryOptimization === 'function') {
-          window.AndroidTTS.requestIgnoreBatteryOptimization()
-        }
       } catch (err) {
         console.warn('[AndroidTTS] permission request error:', err)
       }
@@ -565,6 +564,7 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
       if (!Array.isArray(data)) return
 
       const currentIds = new Set<string>(data.map((r) => r.id))
+      setServiceRequests(data)
 
       if (isInitialServiceFetch.current) {
         knownServiceIds.current = currentIds
@@ -603,7 +603,8 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
     const scheduleNext = () => {
       if (!active) return
       const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden'
-      const delayMs = isHidden ? 8000 : 5000
+      // 6s when dashboard is active on screen; back off to 25s when browser tab is hidden/minimized
+      const delayMs = isHidden ? 25000 : 6000
       timer = setTimeout(async () => {
         await Promise.allSettled([pollActiveOrders(), pollServiceRequests()])
         scheduleNext()
@@ -647,6 +648,7 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
         announceOrderDirectly,
         announceServiceDirectly,
         activeOrders,
+        serviceRequests,
         refreshActiveOrders,
         isSyncing,
         audioUnlocked,

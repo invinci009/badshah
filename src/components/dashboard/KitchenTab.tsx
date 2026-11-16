@@ -92,15 +92,13 @@ function ageMin(createdAt: string) {
 }
 
 export default function KitchenTab() {
-  const { isVoiceEnabled, toggleVoice, activeOrders, refreshActiveOrders } = useOrderAnnouncer()
+  const { isVoiceEnabled, toggleVoice, activeOrders, serviceRequests, refreshActiveOrders } = useOrderAnnouncer()
   const [orders, setOrders] = useState<KOrder[]>([])
   const [details, setDetails] = useState<Map<string, KDetail>>(new Map())
   const detailsRef = useRef<Map<string, KDetail>>(new Map())
   const [requests, setRequests] = useState<StaffCall[]>([])
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const serviceEtagRef = useRef<string | null>(null)
-  const authFailCountRef = useRef(0)
 
   // 1. Sync active orders and details directly from centralized active orders state
   useEffect(() => {
@@ -141,60 +139,21 @@ export default function KitchenTab() {
     setDetails(new Map(detailsRef.current))
   }, [activeOrders])
 
-  // 2. Poll open service requests (waiter calls) with ETag caching
-  const loadServiceRequests = useCallback(async () => {
-    try {
-      const sHeaders: Record<string, string> = { 'Cache-Control': 'no-cache' }
-      if (serviceEtagRef.current) sHeaders['If-None-Match'] = serviceEtagRef.current
-
-      const sRes = await fetch(`/api/business/service-requests?status=OPEN`, {
-        headers: sHeaders,
-      })
-      if (sRes.status === 401) {
-        // Protect against accidental logout during temporary network or token transitions
-        authFailCountRef.current += 1
-        if (authFailCountRef.current >= 12) {
-          window.location.href = '/login'
-        }
-        return
-      }
-      authFailCountRef.current = 0
-      if (sRes.status === 304) {
-        return
-      }
-      if (sRes.ok) {
-        const newSEtag = sRes.headers.get('ETag')
-        if (newSEtag) serviceEtagRef.current = newSEtag
-        const sData = await sRes.json()
-        if (Array.isArray(sData)) setRequests(sData)
-      }
-    } catch {
-      // Non-critical background network retry
-    }
-  }, [])
-
+  // 2. Sync open service requests directly from centralized OrderAnnouncer state (Zero redundant polling!)
   useEffect(() => {
-    loadServiceRequests()
-
-    // 5-second interval for service requests
-    const t = setInterval(loadServiceRequests, 5000)
-
-    // Immediate sync when tab gains visibility, window focus, or network reconnects
-    const onVis = () => {
-      loadServiceRequests()
-      refreshActiveOrders()
-    }
-    document.addEventListener('visibilitychange', onVis)
-    window.addEventListener('focus', onVis)
-    window.addEventListener('online', onVis)
-
-    return () => {
-      clearInterval(t)
-      document.removeEventListener('visibilitychange', onVis)
-      window.removeEventListener('focus', onVis)
-      window.removeEventListener('online', onVis)
-    }
-  }, [loadServiceRequests, refreshActiveOrders])
+    if (!serviceRequests) return
+    const openCalls: StaffCall[] = serviceRequests
+      .filter((r) => r.status === 'OPEN')
+      .map((r) => ({
+        id: r.id,
+        tableLabel: r.tableLabel,
+        type: r.type,
+        note: r.note,
+        status: r.status,
+        createdAt: r.createdAt || new Date().toISOString(),
+      }))
+    setRequests(openCalls)
+  }, [serviceRequests])
 
   const advance = async (id: string, to: string) => {
     setBusy(id)
@@ -234,7 +193,7 @@ export default function KitchenTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, status }),
       })
-      loadServiceRequests()
+      await refreshActiveOrders()
     } catch {
       alert('Failed to update request')
     }

@@ -133,4 +133,16 @@ test('Cloudflare Security Audit Skill — Vulnerability Patch Verification', asy
     assert.ok(loyaltyContent.includes('runTransaction'), 'Executes OTP verification in atomic transaction')
     assert.ok(loyaltyContent.includes('timingSafeEqual'), 'Uses constant-time comparison for OTP')
   })
+
+  await t.test('11. Service Requests Fast-Path ETag & Zero-Read Polling', () => {
+    const routePath = path.resolve(root, 'src/app/api/business/service-requests/route.ts')
+    const orderingPath = path.resolve(root, 'src/lib/firebase/ordering.ts')
+    const routeContent = fs.readFileSync(routePath, 'utf8')
+    const orderingContent = fs.readFileSync(orderingPath, 'utf8')
+
+    assert.ok(routeContent.includes('getActiveServiceRequestsEtag'), 'Route checks cached ETag')
+    assert.ok(routeContent.includes('status: 304'), 'Route returns 304 on ETag match')
+    assert.ok(orderingContent.includes('computeServiceRequestsEtag'), 'Ordering lib has computeServiceRequestsEtag')
+    assert.ok(orderingContent.includes('invalidateActiveServiceRequestsCache'), 'Ordering lib has invalidateActiveServiceRequestsCache')
+  })
 })

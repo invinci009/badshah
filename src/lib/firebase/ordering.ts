@@ -1170,6 +1170,49 @@ export interface ServiceRequest {
   resolvedAt?: string | null
 }
 
+interface ActiveServiceRequestsCacheState {
+  requests: ServiceRequest[]
+  fetchedAt: number
+  inFlight: Promise<ServiceRequest[]> | null
+  etag: string
+}
+
+declare global {
+  var __rp_activeServiceRequestsCache: ActiveServiceRequestsCacheState | undefined
+}
+
+const activeServiceRequestsCache: ActiveServiceRequestsCacheState = (globalThis.__rp_activeServiceRequestsCache ??= {
+  requests: [],
+  fetchedAt: 0,
+  inFlight: null,
+  etag: '',
+})
+
+export function computeServiceRequestsEtag(list: ServiceRequest[]): string {
+  if (!list || list.length === 0) return 'W/"sr-empty"'
+  let sig = `${list.length}`
+  for (let i = 0; i < list.length; i++) {
+    const r = list[i]
+    sig += `|${r.id}:${r.status}:${r.updatedAt || r.createdAt || ''}`
+  }
+  let hash = 5381
+  for (let i = 0; i < sig.length; i++) {
+    hash = (hash * 33) ^ sig.charCodeAt(i)
+  }
+  return `W/"sr-${(hash >>> 0).toString(36)}-${list.length}"`
+}
+
+export function invalidateActiveServiceRequestsCache(): void {
+  activeServiceRequestsCache.fetchedAt = 0
+  activeServiceRequestsCache.inFlight = null
+  activeServiceRequestsCache.etag = `W/"sr-${Date.now()}"`
+  invalidateCache('serviceRequests')
+}
+
+export function getActiveServiceRequestsEtag(): string {
+  return activeServiceRequestsCache.etag || computeServiceRequestsEtag(activeServiceRequestsCache.requests)
+}
+
 export async function createServiceRequest(data: {
   tableId: string
   tableLabel: string
@@ -1190,24 +1233,63 @@ export async function createServiceRequest(data: {
     resolvedAt: null,
   }
   await ref.set(stripUndefined({ ...req }))
-  invalidateCache('serviceRequests')
+  invalidateActiveServiceRequestsCache()
   return { id: ref.id, ...req } as ServiceRequest
 }
 
-export async function getServiceRequests(status?: string, limit = 50): Promise<ServiceRequest[]> {
-  const cacheKey = status ? `serviceRequests:${status}` : 'serviceRequests:all'
-  const list = await getCached(cacheKey, 6000, async () => {
-    if (status) {
-      const snap = await getDb()
-        .collection('serviceRequests')
-        .where('status', '==', status)
-        .limit(50)
-        .get()
-      const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)
-      return docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+export async function getServiceRequests(status?: string, limit = 50, forceFresh = false): Promise<ServiceRequest[]> {
+  const now = Date.now()
+  const TTL_MS = 6000 // 6 seconds in-memory coalescing
+
+  if (status === 'OPEN' || !status) {
+    if (!forceFresh && activeServiceRequestsCache.fetchedAt > 0 && now - activeServiceRequestsCache.fetchedAt < TTL_MS) {
+      return activeServiceRequestsCache.requests.slice(0, limit)
     }
-    const snap = await getDb().collection('serviceRequests').orderBy('createdAt', 'desc').limit(50).get()
-    return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)
+
+    if (activeServiceRequestsCache.inFlight) {
+      try {
+        const list = await activeServiceRequestsCache.inFlight
+        return list.slice(0, limit)
+      } catch {
+        // Fall through
+      }
+    }
+
+    const fetchPromise = (async () => {
+      try {
+        let query = getDb().collection('serviceRequests') as FirebaseFirestore.Query
+        if (status === 'OPEN') {
+          query = query.where('status', '==', 'OPEN')
+        }
+        const snap = await query.limit(50).get()
+        const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)
+        docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+
+        activeServiceRequestsCache.requests = docs
+        activeServiceRequestsCache.fetchedAt = Date.now()
+        activeServiceRequestsCache.etag = computeServiceRequestsEtag(docs)
+
+        return docs
+      } finally {
+        activeServiceRequestsCache.inFlight = null
+      }
+    })()
+
+    activeServiceRequestsCache.inFlight = fetchPromise
+    const res = await fetchPromise
+    return res.slice(0, limit)
+  }
+
+  // Other statuses (RESOLVED, CANCELLED, etc.)
+  const cacheKey = status ? `serviceRequests:${status}` : 'serviceRequests:all'
+  const list = await getCached(cacheKey, 15000, async () => {
+    const snap = await getDb()
+      .collection('serviceRequests')
+      .where('status', '==', status)
+      .limit(50)
+      .get()
+    const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as ServiceRequest)
+    return docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
   })
   return list.slice(0, limit)
 }
@@ -1216,5 +1298,5 @@ export async function updateServiceRequest(id: string, status: ServiceRequest['s
   const updates: Record<string, unknown> = { status, updatedAt: serverNow() }
   if (status === 'RESOLVED' || status === 'CANCELLED') updates.resolvedAt = serverNow()
   await getDb().doc(`serviceRequests/${id}`).update(updates)
-  invalidateCache('serviceRequests')
+  invalidateActiveServiceRequestsCache()
 }

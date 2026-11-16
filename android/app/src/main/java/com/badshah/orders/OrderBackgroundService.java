@@ -55,21 +55,7 @@ public class OrderBackgroundService extends Service {
         setAppContext(this);
         createNotificationChannels();
 
-        // 1. Keep CPU active so voice announcements & background poller run when screen is off
-        try {
-            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
-            if (pm != null) {
-                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BadshahOrders:BgWakeLock");
-                wakeLock.acquire();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-
-        // 2. Initialize native Text-to-Speech (Google TTS with Hindi locale)
-        initTTS(this);
-
-        // 3. Start Foreground Service with persistent status notification
+        // 1. Start Foreground Service IMMEDIATELY at line 1 to satisfy Android's 5-second deadline
         Notification notification = buildForegroundNotification();
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -80,6 +66,20 @@ public class OrderBackgroundService extends Service {
         } catch (Exception e) {
             e.printStackTrace();
         }
+
+        // 2. Keep CPU active so voice announcements & background poller run when screen is off
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BadshahOrders:BgWakeLock");
+                wakeLock.acquire();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        // 3. Initialize native Text-to-Speech (Google TTS with Hindi locale)
+        initTTS(this);
 
         // 4. Start native background order listener thread
         isRunning = true;
@@ -182,7 +182,6 @@ public class OrderBackgroundService extends Service {
             alertChannel.setVibrationPattern(new long[]{0, 350, 150, 350});
             alertChannel.enableLights(true);
             alertChannel.setLightColor(0xFFFFB703);
-            alertChannel.setBypassDnd(true);
             alertChannel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
 
             try {
@@ -270,9 +269,7 @@ public class OrderBackgroundService extends Service {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setSound(soundUri)
             .setVibrate(new long[]{0, 350, 150, 350})
-            .setDefaults(Notification.DEFAULT_ALL)
             .setAutoCancel(true)
-            .setFullScreenIntent(pendingIntent, true)
             .setContentIntent(pendingIntent)
             .build();
 
@@ -291,15 +288,15 @@ public class OrderBackgroundService extends Service {
             }
         } catch (Exception ignored) {}
 
-        // Wake screen briefly so sleeping kitchen tablet lights up and displays heads-up order popup
+        // Safe short CPU wake lock during audio announcement (avoids screen lock deadlocks)
         try {
             PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
             if (pm != null) {
-                PowerManager.WakeLock screenLock = pm.newWakeLock(
-                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE,
-                    "BadshahOrders:ScreenWakeAlert"
+                PowerManager.WakeLock cpuLock = pm.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "BadshahOrders:OrderWakeAlert"
                 );
-                screenLock.acquire(8000);
+                cpuLock.acquire(4000);
             }
         } catch (Exception ignored) {}
 
@@ -379,9 +376,7 @@ public class OrderBackgroundService extends Service {
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setSound(soundUri)
             .setVibrate(new long[]{0, 350, 150, 350})
-            .setDefaults(Notification.DEFAULT_ALL)
             .setAutoCancel(true)
-            .setFullScreenIntent(pendingIntent, true)
             .setContentIntent(pendingIntent)
             .build();
 
@@ -400,15 +395,15 @@ public class OrderBackgroundService extends Service {
             }
         } catch (Exception ignored) {}
 
-        // Wake screen briefly so sleeping kitchen tablet lights up and displays heads-up service popup
+        // Safe short CPU wake lock during audio announcement (avoids screen lock deadlocks)
         try {
             PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
             if (pm != null) {
-                PowerManager.WakeLock screenLock = pm.newWakeLock(
-                    PowerManager.SCREEN_BRIGHT_WAKE_LOCK | PowerManager.ACQUIRE_CAUSES_WAKEUP | PowerManager.ON_AFTER_RELEASE,
-                    "BadshahOrders:ScreenWakeAlert"
+                PowerManager.WakeLock cpuLock = pm.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "BadshahOrders:ServiceWakeAlert"
                 );
-                screenLock.acquire(8000);
+                cpuLock.acquire(4000);
             }
         } catch (Exception ignored) {}
 

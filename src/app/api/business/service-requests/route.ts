@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { getServiceRequests, updateServiceRequest } from '@/lib/firebase/ordering'
+import {
+  getServiceRequests,
+  updateServiceRequest,
+  getActiveServiceRequestsEtag,
+  computeServiceRequestsEtag,
+} from '@/lib/firebase/ordering'
 import { getSessionFromRequest } from '@/lib/firebase/auth'
 import { serviceRequestPatchSchema } from '@/lib/ordering/validation'
 
@@ -9,9 +14,22 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status') || undefined
+
+    // Fast-path: Check in-memory ETag for active waiter calls before running any database query (0 Firestore reads)
+    if (status === 'OPEN' || !status) {
+      const cachedEtag = getActiveServiceRequestsEtag()
+      const ifNoneMatch = request.headers.get('if-none-match')
+      if (cachedEtag && ifNoneMatch === cachedEtag) {
+        return new NextResponse(null, {
+          status: 304,
+          headers: { ETag: cachedEtag, 'Cache-Control': 'no-cache' },
+        })
+      }
+    }
+
     const requests = await getServiceRequests(status, 200)
-    const latest = requests[0]?.updatedAt || requests[0]?.createdAt || '0'
-    const etag = `W/"sr-${requests.length}-${requests[0]?.id || '0'}-${latest}"`
+    const etag = computeServiceRequestsEtag(requests)
+
     if (request.headers.get('if-none-match') === etag) {
       return new NextResponse(null, {
         status: 304,

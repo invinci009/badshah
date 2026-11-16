@@ -21,31 +21,16 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // 1. Keep screen on and display over lock screen for incoming orders
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-            setShowWhenLocked(true);
-            setTurnScreenOn(true);
-        } else {
-            getWindow().addFlags(
-                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
-                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
-                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
-            );
-        }
+        // Keep screen on while operating on counter (safe kitchen display mode)
+        try {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } catch (Exception ignored) {}
 
-        // 2. Request Android 13+ (API 33+) POST_NOTIFICATIONS runtime permission immediately on start
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, PERMISSION_REQ_POST_NOTIF);
-            }
-        }
-
-        // 3. Connect application context & pre-warm native Text-to-Speech engine
+        // Connect application context & pre-warm native Text-to-Speech engine
         OrderBackgroundService.setAppContext(this);
         OrderBackgroundService.initTTS(this);
 
-        // 4. Start foreground background service with persistent status notification
+        // Start foreground background service to keep orders active in background
         try {
             Intent serviceIntent = new Intent(this, OrderBackgroundService.class);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -55,6 +40,19 @@ public class MainActivity extends BridgeActivity {
             }
         } catch (Exception e) {
             e.printStackTrace();
+        }
+
+        // Request Android 13+ (API 33+) POST_NOTIFICATIONS permission safely after UI loads
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            try {
+                getWindow().getDecorView().postDelayed(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, PERMISSION_REQ_POST_NOTIF);
+                        }
+                    }
+                }, 1200);
+            } catch (Exception ignored) {}
         }
 
         if (this.bridge != null && this.bridge.getWebView() != null) {
