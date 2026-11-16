@@ -306,6 +306,7 @@ export async function createCustomerAccount(data: {
   }
   await db.doc(`customerAccounts/${data.phone}`).set(stripUndefined(account as unknown as Record<string, unknown>))
   invalidateCache(`customerAccount:${data.phone}`)
+  invalidateCache('loyalty:customers')
   await ensureLoyaltyAccount(data.phone)
   return account
 }
@@ -373,6 +374,7 @@ export async function markCustomerVerified(phone: string): Promise<void> {
 export async function setCustomerStatus(phone: string, status: CustomerAccount['status']): Promise<void> {
   await getDb().doc(`customerAccounts/${phone}`).update({ status, updatedAt: serverNow() })
   invalidateCache(`customerAccount:${phone}`)
+  invalidateCache('loyalty:customers')
 }
 
 export async function updateCustomerPassword(phone: string, password: string): Promise<void> {
@@ -589,6 +591,9 @@ export function invalidateCustomerLoyaltyCache(phone: string): void {
   invalidateCache(`loyalty:ledger:${phone}`)
   invalidateCache(`loyalty:redemptions:${phone}`)
   invalidateCache(`redemptions:count:${phone}`)
+  invalidateCache('loyalty:customers')
+  invalidateCache('loyalty:redemptions')
+  invalidateCache('loyalty:analytics')
 }
 
 /**
@@ -1290,19 +1295,22 @@ function summarize(account: LoyaltyAccount): LoyaltySnapshot {
 
 async function sweepAndSnapshot(phone: string): Promise<LoyaltySnapshot> {
   const db = getDb()
-  await ensureLoyaltyAccount(phone)
   const snap = await db.runTransaction(async (tx) => {
     const ref = db.doc(`loyaltyAccounts/${phone}`)
     const doc = await tx.get(ref)
-    if (!doc.exists) return null
+    if (!doc.exists) {
+      const empty = emptyLoyaltyAccount(phone, serverNow())
+      tx.set(ref, empty)
+      return empty
+    }
     const sweep = sweepExpiredBuckets(tx, doc.data() as LoyaltyAccount, new Date())
     if (sweep.expiredPoints > 0) {
       tx.set(ref, { ...sweep.accountData, updatedAt: new Date().toISOString() })
       invalidateCache('loyalty:analytics')
+      invalidateCache('loyalty:customers')
     }
     return sweep.accountData
   })
-  if (snap) invalidateCache(`loyalty:summary:${phone}`)
   return snap ? summarize(snap) : summarize(emptyLoyaltyAccount(phone, serverNow()))
 }
 
@@ -1460,28 +1468,30 @@ export interface LoyaltyCustomerRow {
 }
 
 export async function listLoyaltyCustomers(limit = 200): Promise<LoyaltyCustomerRow[]> {
-  const db = getDb()
-  const [custSnap, accSnaps] = await Promise.all([
-    db.collection('customerAccounts').limit(limit).get(),
-    db.collection('loyaltyAccounts').limit(limit * 2).get(),
-  ])
-  const accountsByPhone = new Map(accSnaps.docs.map((d) => [d.id, d.data() as LoyaltyAccount]))
-  const rows: LoyaltyCustomerRow[] = custSnap.docs.map((d) => {
-    const cust = d.data() as CustomerAccount
-    const acc = accountsByPhone.get(d.id)
-    return {
-      phone: d.id,
-      name: cust.name,
-      status: cust.status ?? 'active',
-      verified: cust.verified ?? false,
-      createdAt: cust.createdAt,
-      lastLoginAt: cust.lastLoginAt ?? null,
-      snapshot: acc
-        ? summarize(acc)
-        : summarize(emptyLoyaltyAccount(d.id, serverNow())),
-    }
+  return getCached(`loyalty:customers:list:${limit}`, 45 * 1000, async () => {
+    const db = getDb()
+    const [custSnap, accSnaps] = await Promise.all([
+      db.collection('customerAccounts').limit(limit).get(),
+      db.collection('loyaltyAccounts').limit(limit * 2).get(),
+    ])
+    const accountsByPhone = new Map(accSnaps.docs.map((d) => [d.id, d.data() as LoyaltyAccount]))
+    const rows: LoyaltyCustomerRow[] = custSnap.docs.map((d) => {
+      const cust = d.data() as CustomerAccount
+      const acc = accountsByPhone.get(d.id)
+      return {
+        phone: d.id,
+        name: cust.name,
+        status: cust.status ?? 'active',
+        verified: cust.verified ?? false,
+        createdAt: cust.createdAt,
+        lastLoginAt: cust.lastLoginAt ?? null,
+        snapshot: acc
+          ? summarize(acc)
+          : summarize(emptyLoyaltyAccount(d.id, serverNow())),
+      }
+    })
+    return rows.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
   })
-  return rows.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
 }
 
 export async function getAdminCustomerDetail(phone: string): Promise<{
@@ -1509,13 +1519,16 @@ export interface LoyaltyRedemptionRow extends Redemption {
 }
 
 export async function listRedemptionsFilterable(status?: string, limit = 200): Promise<LoyaltyRedemptionRow[]> {
-  const db = getDb()
-  const q = status
-    ? await db.collection('redemptions').where('status', '==', status).limit(limit).get()
-    : await db.collection('redemptions').orderBy('createdAt', 'desc').limit(limit).get()
-  const rows = q.docs.map((d) => ({ ...(d.data() as Redemption), id: ((d.data() as Redemption).id as string | undefined) ?? d.id })) as Redemption[]
-  rows.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
-  return rows
+  const cacheKey = `loyalty:redemptions:list:${status || 'all'}:${limit}`
+  return getCached(cacheKey, 30 * 1000, async () => {
+    const db = getDb()
+    const q = status
+      ? await db.collection('redemptions').where('status', '==', status).limit(limit).get()
+      : await db.collection('redemptions').orderBy('createdAt', 'desc').limit(limit).get()
+    const rows = q.docs.map((d) => ({ ...(d.data() as Redemption), id: ((d.data() as Redemption).id as string | undefined) ?? d.id })) as Redemption[]
+    rows.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+    return rows
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -1537,7 +1550,7 @@ export interface LoyaltyAnalytics {
 }
 
 export async function getLoyaltyAnalytics(): Promise<LoyaltyAnalytics> {
-  return getCached('loyalty:analytics', 20 * 1000, async () => {
+  return getCached('loyalty:analytics', 3 * 60 * 1000, async () => {
     const db = getDb()
     const [accSnap, redSnap, earnSnap] = await Promise.all([
       db.collection('loyaltyAccounts').limit(500).get(),

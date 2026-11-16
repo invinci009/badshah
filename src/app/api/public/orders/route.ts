@@ -30,6 +30,8 @@ import { computeQuote } from '@/lib/ordering/rules.mjs'
 // POST /api/public/orders — server-authoritative order creation.
 // Validates restaurant, table token, phone, items, options; rechecks
 // availability/prices; computes money server-side; idempotent by key.
+const inFlightOrderCreations = new Map<string, Promise<NextResponse>>()
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}))
@@ -39,59 +41,66 @@ export async function POST(request: NextRequest) {
     }
     const input = parsed.data
 
-    // 1. Restaurant (campaign slug must exist + active).
-    const campaign = await getCampaignBySlug(input.slug).catch(() => null)
-    if (!campaign || !campaign.active) {
-      return NextResponse.json({ error: 'Ordering is not available for this link' }, { status: 404 })
+    // In-flight concurrency lock: if identical idempotency key is currently processing, coalesce onto existing promise
+    const inFlight = inFlightOrderCreations.get(input.idempotencyKey)
+    if (inFlight) {
+      return await inFlight
     }
 
-    // 2. Idempotency: same key → same order (phone must match).
-    const existing = await getOrderByIdempotencyKey(input.idempotencyKey).catch(() => null)
-    // Loyalty & Authentication: Diners must be logged in before placing an order.
-    // If authenticated via cookie session, the verified customer phone is used.
-    // If session is absent, require valid phone to resolve/create customer account or reject with LOGIN_REQUIRED.
-    let session = await getCustomerSession(request).catch(() => null)
-    let phone: string | null = null
-    let account = null
+    const creationPromise = (async (): Promise<NextResponse> => {
+      // 1. Restaurant (campaign slug must exist + active).
+      const campaign = await getCampaignBySlug(input.slug).catch(() => null)
+      if (!campaign || !campaign.active) {
+        return NextResponse.json({ error: 'Ordering is not available for this link' }, { status: 404 })
+      }
 
-    if (session && session.verified) {
-      phone = session.customerId
-      account = await getCustomerAccount(phone).catch(() => null)
-    } else {
-      const normalizedInputPhone = normalizePhoneServerSide(input.customerPhone)
-      if (!normalizedInputPhone) {
+      // 2. Idempotency: same key → same order (phone must match).
+      const existing = await getOrderByIdempotencyKey(input.idempotencyKey).catch(() => null)
+      // Loyalty & Authentication: Diners must be logged in before placing an order.
+      // If authenticated via cookie session, the verified customer phone is used.
+      // If session is absent, require valid phone to resolve/create customer account or reject with LOGIN_REQUIRED.
+      let session = await getCustomerSession(request).catch(() => null)
+      let phone: string | null = null
+      let account = null
+
+      if (session && session.verified) {
+        phone = session.customerId
+        account = await getCustomerAccount(phone).catch(() => null)
+      } else {
+        const normalizedInputPhone = normalizePhoneServerSide(input.customerPhone)
+        if (!normalizedInputPhone) {
+          return NextResponse.json(
+            { error: 'Please enter your mobile number to log in before placing an order', code: 'LOGIN_REQUIRED' },
+            { status: 401 }
+          )
+        }
+        account = await getOrCreateCustomerAccount({ phone: normalizedInputPhone, name: input.customerName }).catch(() => null)
+        phone = normalizedInputPhone
+      }
+
+      if (account && account.status === 'suspended') {
         return NextResponse.json(
-          { error: 'Please enter your mobile number to log in before placing an order', code: 'LOGIN_REQUIRED' },
-          { status: 401 }
+          { error: 'Your loyalty account is suspended. Please contact restaurant staff.', code: 'SUSPENDED' },
+          { status: 403 }
         )
       }
-      account = await getOrCreateCustomerAccount({ phone: normalizedInputPhone, name: input.customerName }).catch(() => null)
-      phone = normalizedInputPhone
-    }
 
-    if (account && account.status === 'suspended') {
-      return NextResponse.json(
-        { error: 'Your loyalty account is suspended. Please contact restaurant staff.', code: 'SUSPENDED' },
-        { status: 403 }
-      )
-    }
-
-    const loyaltyCustomerPhone: string | null = phone
-    if (existing) {
-      if (existing.customerPhone !== phone) {
-        return NextResponse.json({ error: 'Duplicate request with different details' }, { status: 409 })
+      const loyaltyCustomerPhone: string | null = phone
+      if (existing) {
+        if (existing.customerPhone !== phone) {
+          return NextResponse.json({ error: 'Duplicate request with different details' }, { status: 409 })
+        }
+        return NextResponse.json(
+          {
+            orderId: existing.id,
+            orderNumber: existing.orderNumber,
+            totalPaise: existing.totalPaise,
+            tableLabel: existing.tableLabel,
+            duplicate: true,
+          },
+          { status: 200 }
+        )
       }
-      return NextResponse.json(
-        {
-          orderId: existing.id,
-          orderNumber: existing.orderNumber,
-          totalPaise: existing.totalPaise,
-          tableLabel: existing.tableLabel,
-          duplicate: true,
-        },
-        { status: 200 }
-      )
-    }
 
     // 3. Table resolution (token or table label)
     let tableId: string | null = null
@@ -419,6 +428,15 @@ export async function POST(request: NextRequest) {
       },
       { status: 201 }
     )
+    })()
+
+    inFlightOrderCreations.set(input.idempotencyKey, creationPromise)
+    try {
+      const response = await creationPromise
+      return response
+    } finally {
+      setTimeout(() => inFlightOrderCreations.delete(input.idempotencyKey), 10000)
+    }
   } catch (error) {
     console.error('Public order creation error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

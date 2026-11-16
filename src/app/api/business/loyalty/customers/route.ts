@@ -26,7 +26,20 @@ export async function GET(request: NextRequest) {
             r.name.toLowerCase().includes(q)
         )
       : rows
-    return NextResponse.json(filtered)
+
+    const latest = filtered[0]?.lastLoginAt || filtered[0]?.createdAt || '0'
+    const etag = `W/"lc-${filtered.length}-${filtered[0]?.phone || '0'}-${latest}"`
+    if (request.headers.get('if-none-match') === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: { ETag: etag, 'Cache-Control': 'no-cache' },
+      })
+    }
+
+    return NextResponse.json(filtered, {
+      status: 200,
+      headers: { ETag: etag, 'Cache-Control': 'no-cache' },
+    })
   } catch (error) {
     console.error('Loyalty customers GET error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

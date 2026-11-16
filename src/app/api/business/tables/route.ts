@@ -12,7 +12,18 @@ export async function GET(request: NextRequest) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   try {
     const tables = await getTables(true)
-    return NextResponse.json(tables, { status: 200 })
+    const latest = tables[0]?.updatedAt || tables[0]?.createdAt || '0'
+    const etag = `W/"tbl-${tables.length}-${tables[0]?.id || '0'}-${latest}"`
+    if (request.headers.get('if-none-match') === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: { ETag: etag, 'Cache-Control': 'no-cache' },
+      })
+    }
+    return NextResponse.json(tables, {
+      status: 200,
+      headers: { ETag: etag, 'Cache-Control': 'no-cache' },
+    })
   } catch (error) {
     console.error('Tables GET error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

@@ -79,6 +79,7 @@ export default function OrderConfirmationPage() {
   const [loyaltyLoggedIn, setLoyaltyLoggedIn] = useState(false)
   const [copied, setCopied] = useState(false)
   const etagRef = useRef<string | null>(null)
+  const sseActiveRef = useRef(false)
 
   useEffect(() => {
     setMounted(true)
@@ -159,6 +160,9 @@ export default function OrderConfirmationPage() {
     let es: EventSource | null = null
     try {
       es = new EventSource(`/api/public/orders/${orderId}/events?token=${encodeURIComponent(accessToken)}`)
+      es.onopen = () => {
+        sseActiveRef.current = true
+      }
       es.onmessage = (event) => {
         try {
           if (!event.data || event.data.startsWith(':')) return
@@ -179,20 +183,24 @@ export default function OrderConfirmationPage() {
         } catch {}
       }
       es.onerror = () => {
+        sseActiveRef.current = false
         // Handled gracefully by fallback poller
         if (es) {
           es.close()
           es = null
         }
       }
-    } catch {}
+    } catch {
+      sseActiveRef.current = false
+    }
 
     return () => {
+      sseActiveRef.current = false
       if (es) es.close()
     }
   }, [accessToken, orderId, order?.fulfilment, fetchOrder])
 
-  // 2. Adaptive Fast-Polling Fallback (every 3.5 seconds while active)
+  // 2. Adaptive Polling: 0-load when SSE is live, safe 8s fallback if SSE drops
   useEffect(() => {
     if (!accessToken) return
     fetchOrder()
@@ -201,11 +209,21 @@ export default function OrderConfirmationPage() {
       return
     }
 
-    const t = setInterval(() => {
+    // Fallback interval (8s) only triggers when SSE connection drops
+    const fallbackTimer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        if (!sseActiveRef.current) {
+          fetchOrder(true)
+        }
+      }
+    }, 8000)
+
+    // Gentle 30s heartbeat when active to ensure total state consistency
+    const heartbeatTimer = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         fetchOrder(true)
       }
-    }, 3500)
+    }, 30000)
 
     const onVisible = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
@@ -216,7 +234,8 @@ export default function OrderConfirmationPage() {
     window.addEventListener('focus', onVisible)
 
     return () => {
-      clearInterval(t)
+      clearInterval(fallbackTimer)
+      clearInterval(heartbeatTimer)
       document.removeEventListener('visibilitychange', onVisible)
       window.removeEventListener('focus', onVisible)
     }

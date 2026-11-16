@@ -15,7 +15,19 @@ export async function GET(request: NextRequest) {
     if (status && !valid.includes(status)) {
       return NextResponse.json({ error: 'Invalid status filter' }, { status: 400 })
     }
-    return NextResponse.json(await listRedemptionsFilterable(status, limit))
+    const data = await listRedemptionsFilterable(status, limit)
+    const latest = data[0]?.updatedAt || data[0]?.createdAt || '0'
+    const etag = `W/"lr-${data.length}-${data[0]?.id || '0'}-${latest}"`
+    if (request.headers.get('if-none-match') === etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: { ETag: etag, 'Cache-Control': 'no-cache' },
+      })
+    }
+    return NextResponse.json(data, {
+      status: 200,
+      headers: { ETag: etag, 'Cache-Control': 'no-cache' },
+    })
   } catch (error) {
     console.error('Loyalty redemptions GET error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })

@@ -20,16 +20,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: 'Not authorized to view this order' }, { status: 403 })
     }
 
-    const config = getRestaurantConfig()
-    const settings = await getRestaurantSettings().catch(() => null)
-
-    let cancellationReason: string | null = null
-    if (order.fulfilment === 'CANCELLED') {
-      const events = await getOrderEvents(order.id).catch(() => [])
-      const cancelEv = [...events].reverse().find((e) => e.next === 'CANCELLED' && e.reason)
-      cancellationReason = cancelEv?.reason || null
-    }
-
+    // Fast-path ETag check: return 304 immediately before querying settings or order events (0 extra work/reads)
     const etag = `W/"${order.id}-${order.fulfilment}-${order.paymentStatus}-${order.updatedAt || order.createdAt}"`
     if (request.headers.get('if-none-match') === etag) {
       return new NextResponse(null, {
@@ -39,6 +30,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           'Cache-Control': 'no-cache',
         },
       })
+    }
+
+    const config = getRestaurantConfig()
+    const settings = await getRestaurantSettings().catch(() => null)
+
+    let cancellationReason: string | null = null
+    if (order.fulfilment === 'CANCELLED') {
+      const events = await getOrderEvents(order.id).catch(() => [])
+      const cancelEv = [...events].reverse().find((e) => e.next === 'CANCELLED' && e.reason)
+      cancellationReason = cancelEv?.reason || null
     }
 
     return NextResponse.json(

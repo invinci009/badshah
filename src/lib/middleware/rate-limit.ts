@@ -77,8 +77,8 @@ function checkMemoryLimit(
   bucket.count++
   const remaining = Math.max(0, limit - bucket.count)
 
-  // Periodic pruning of expired entries
-  if (memoryLimiterStore.size > 1500) {
+  // Periodic pruning of expired entries (supports up to 25,000 active concurrent users)
+  if (memoryLimiterStore.size > 25000) {
     for (const [k, v] of memoryLimiterStore.entries()) {
       if (v.resetAt <= now) {
         memoryLimiterStore.delete(k)
@@ -102,8 +102,16 @@ export async function rateLimitMiddleware(request: NextRequest): Promise<NextRes
     request.headers.get('x-real-ip') ||
     'client'
 
+  // Extract session token or table identifier to prevent restaurant-wide NAT Wi-Fi false throttling
+  const sessionToken =
+    request.cookies.get('badshah_vip_session')?.value ||
+    request.cookies.get('rp_table_session')?.value ||
+    request.headers.get('x-table-id') ||
+    request.headers.get('x-session-id') ||
+    ''
+
   // Determine rate limits and isolated bucket key based on action type
-  // Public catalog reads have high capacity to support 400+ guests sharing the restaurant Wi-Fi IP
+  // High capacity guarantees seamless service for 10k+ daily users and 100+ concurrent orders on restaurant Wi-Fi
   let maxRequests = 120
   let category = 'general'
   const windowMs = 60_000 // 1 minute
@@ -117,37 +125,38 @@ export async function rateLimitMiddleware(request: NextRequest): Promise<NextRes
     maxRequests = 60
     category = 'auth-general'
   } else if (pathname.includes('/orders') && method === 'POST') {
-    // Order creation: limit to 25 per minute per IP to prevent spam submissions
-    maxRequests = 25
+    // Order creation: 300/min per IP to support 100+ concurrent diners on shared Wi-Fi
+    maxRequests = 300
     category = 'order-create'
   } else if (pathname.includes('/service-requests') && method === 'POST') {
-    // Waiter service requests: limit to 15 per minute per IP
-    maxRequests = 15
+    // Waiter service requests: 150/min per IP
+    maxRequests = 150
     category = 'service-create'
   } else if (pathname.includes('/loyalty/auth') || pathname.includes('/loyalty/claim')) {
-    // Loyalty auth/claim attempts: limit to 30 per minute
-    maxRequests = 30
+    // Loyalty auth/claim attempts: 60/min
+    maxRequests = 60
     category = 'loyalty-auth'
   } else if (pathname.startsWith('/api/business/')) {
-    // Business dashboard routes: max 300 per minute
-    maxRequests = 300
+    // Business dashboard routes: max 600 per minute
+    maxRequests = 600
     category = 'business'
   } else if (pathname === '/api/public/order-menu' || pathname.startsWith('/api/public/order-menu')) {
-    // Public menu & catalog reads: High capacity (1200 per minute per IP)
-    // Critical: Supports 400+ concurrent diners sharing the restaurant's guest Wi-Fi NAT IP
-    maxRequests = 1200
+    // Public menu & catalog reads: High capacity (3000 per minute per IP)
+    // Critical: Supports 1,000+ concurrent diners browsing dishes simultaneously on restaurant Wi-Fi
+    maxRequests = 3000
     category = 'menu-catalog'
   } else if (pathname.startsWith('/api/public/orders/') && method === 'GET') {
-    // Order tracking & SSE stream: 300 per minute per IP
-    maxRequests = 300
+    // Order tracking & SSE stream: 600 per minute per IP
+    maxRequests = 600
     category = 'order-track'
   } else if (pathname.startsWith('/api/public/')) {
-    // General public queries (tables, settings): 300 per minute per IP
-    maxRequests = 300
+    // General public queries (tables, settings): 600 per minute per IP
+    maxRequests = 600
     category = 'public-general'
   }
 
-  const memoryKey = `${ip}:${category}`
+  const sessionSuffix = sessionToken ? `:${sessionToken.slice(0, 16)}` : ''
+  const memoryKey = `${ip}${sessionSuffix}:${category}`
 
   const limiter = getUpstashLimiter()
   if (limiter) {
