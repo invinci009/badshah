@@ -416,6 +416,18 @@ export function OrderAnnouncerProvider({ children }: { children: React.ReactNode
   const requestNotifications = useCallback(async () => {
     unlockAudio()
     setAudioUnlocked(true)
+    if (typeof window !== 'undefined' && window.AndroidTTS) {
+      try {
+        if (typeof window.AndroidTTS.requestNotificationPermission === 'function') {
+          window.AndroidTTS.requestNotificationPermission()
+        }
+        if (typeof window.AndroidTTS.requestIgnoreBatteryOptimization === 'function') {
+          window.AndroidTTS.requestIgnoreBatteryOptimization()
+        }
+      } catch (err) {
+        console.warn('[AndroidTTS] permission request error:', err)
+      }
+    }
     const result = await requestNotificationPermission()
     setEngineStatus((prev) => ({ ...prev, notificationPermission: result }))
   }, [])

@@ -32,6 +32,11 @@ declare global {
       isAvailable: () => boolean
       stop: () => void
       syncCookies?: () => void
+      hasNotificationPermission?: () => boolean
+      requestNotificationPermission?: () => void
+      isBatteryOptimizationIgnored?: () => boolean
+      requestIgnoreBatteryOptimization?: () => void
+      testNotification?: () => void
     }
   }
 }

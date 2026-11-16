@@ -1,29 +1,54 @@
 package com.badshah.orders;
 
+import android.Manifest;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
-import android.speech.tts.TextToSpeech;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebSettings;
 import com.getcapacitor.BridgeActivity;
-import java.util.Locale;
 
 public class MainActivity extends BridgeActivity {
+    private static final int PERMISSION_REQ_POST_NOTIF = 1001;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        // Prevent screen from sleeping while on counter (kitchen display mode)
+        // 1. Keep screen on and display over lock screen for incoming orders
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+        } else {
+            getWindow().addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON |
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+            );
+        }
 
-        // Connect application context & pre-warm native Text-to-Speech engine
+        // 2. Request Android 13+ (API 33+) POST_NOTIFICATIONS runtime permission immediately on start
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, PERMISSION_REQ_POST_NOTIF);
+            }
+        }
+
+        // 3. Connect application context & pre-warm native Text-to-Speech engine
         OrderBackgroundService.setAppContext(this);
         OrderBackgroundService.initTTS(this);
 
-        // Start foreground background service to keep orders active in background
+        // 4. Start foreground background service with persistent status notification
         try {
-            android.content.Intent serviceIntent = new android.content.Intent(this, OrderBackgroundService.class);
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            Intent serviceIntent = new Intent(this, OrderBackgroundService.class);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(serviceIntent);
             } else {
                 startService(serviceIntent);
@@ -43,7 +68,7 @@ public class MainActivity extends BridgeActivity {
             try {
                 android.webkit.CookieManager cookieManager = android.webkit.CookieManager.getInstance();
                 cookieManager.setAcceptCookie(true);
-                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     cookieManager.setAcceptThirdPartyCookies(this.bridge.getWebView(), true);
                 }
                 cookieManager.flush();
@@ -95,17 +120,68 @@ public class MainActivity extends BridgeActivity {
                 public void syncCookies() {
                     persistCookies(MainActivity.this);
                 }
+
+                @JavascriptInterface
+                public boolean hasNotificationPermission() {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED;
+                    }
+                    return true;
+                }
+
+                @JavascriptInterface
+                public void requestNotificationPermission() {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, PERMISSION_REQ_POST_NOTIF);
+                        }
+                    }
+                }
+
+                @JavascriptInterface
+                public boolean isBatteryOptimizationIgnored() {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                        return pm != null && pm.isIgnoringBatteryOptimizations(getPackageName());
+                    }
+                    return true;
+                }
+
+                @JavascriptInterface
+                public void requestIgnoreBatteryOptimization() {
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                            intent.setData(Uri.parse("package:" + getPackageName()));
+                            startActivity(intent);
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                @JavascriptInterface
+                public void testNotification() {
+                    OrderBackgroundService.postOrderAlert(
+                        MainActivity.this,
+                        "TEST-01",
+                        "1",
+                        "Chicken Biryani (x2)",
+                        "टेबल नंबर 1 पर नया आर्डर आया है"
+                    );
+                }
             }, "AndroidTTS");
         }
     }
 
-    public static void persistCookies(android.content.Context context) {
+    public static void persistCookies(Context context) {
         try {
             android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
             cm.flush();
             String c = cm.getCookie("https://biriyani-badshah.vercel.app");
+            if ((c == null || c.trim().isEmpty()) && cm.hasCookies()) {
+                c = cm.getCookie("http://localhost:3000");
+            }
             if (c != null && !c.trim().isEmpty() && context != null) {
-                context.getSharedPreferences("badshah_prefs", android.content.Context.MODE_PRIVATE)
+                context.getSharedPreferences("badshah_prefs", Context.MODE_PRIVATE)
                     .edit()
                     .putString("saved_cookies", c)
                     .apply();

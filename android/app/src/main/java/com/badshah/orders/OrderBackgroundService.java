@@ -72,7 +72,11 @@ public class OrderBackgroundService extends Service {
         // 3. Start Foreground Service with persistent status notification
         Notification notification = buildForegroundNotification();
         try {
-            startForeground(FOREGROUND_NOTIFICATION_ID, notification);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(FOREGROUND_NOTIFICATION_ID, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+            } else {
+                startForeground(FOREGROUND_NOTIFICATION_ID, notification);
+            }
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -164,9 +168,10 @@ public class OrderBackgroundService extends Service {
                 NotificationManager.IMPORTANCE_LOW
             );
             bgChannel.setDescription("Keeps restaurant audio announcements active in background");
+            bgChannel.setShowBadge(false);
             manager.createNotificationChannel(bgChannel);
 
-            // Channel 2: Incoming order alert (High importance, heads-up banner, vibration)
+            // Channel 2: Incoming order alert (High importance, heads-up banner, vibration, sound)
             NotificationChannel alertChannel = new NotificationChannel(
                 ALERT_CHANNEL_ID,
                 "Badshah New Order Alerts",
@@ -174,7 +179,21 @@ public class OrderBackgroundService extends Service {
             );
             alertChannel.setDescription("Incoming table order popups with order items and sound");
             alertChannel.enableVibration(true);
-            alertChannel.setVibrationPattern(new long[]{0, 300, 200, 300});
+            alertChannel.setVibrationPattern(new long[]{0, 350, 150, 350});
+            alertChannel.enableLights(true);
+            alertChannel.setLightColor(0xFFFFB703);
+            alertChannel.setBypassDnd(true);
+            alertChannel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+
+            try {
+                android.net.Uri soundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION);
+                AudioAttributes audioAttributes = new AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .build();
+                alertChannel.setSound(soundUri, audioAttributes);
+            } catch (Exception ignored) {}
+
             manager.createNotificationChannel(alertChannel);
         }
     }
@@ -240,19 +259,37 @@ public class OrderBackgroundService extends Service {
                      ((itemsSummary != null && !itemsSummary.trim().isEmpty()) ? "🍽️ आइटम: " + itemsSummary + "\n" : "") +
                      "डैशबोर्ड खोलने के लिए टैप करें");
 
+        android.net.Uri soundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION);
         Notification notification = new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(contentText)
             .setStyle(bigStyle)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setSound(soundUri)
+            .setVibrate(new long[]{0, 350, 150, 350})
             .setDefaults(Notification.DEFAULT_ALL)
             .setAutoCancel(true)
+            .setFullScreenIntent(pendingIntent, true)
             .setContentIntent(pendingIntent)
             .build();
 
         int alertNotifId = (int) (System.currentTimeMillis() % 100000) + 100;
         manager.notify(alertNotifId, notification);
+
+        // Hardware vibration fallback directly via Vibrator service
+        try {
+            android.os.Vibrator v = (android.os.Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null && v.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    v.vibrate(android.os.VibrationEffect.createWaveform(new long[]{0, 350, 150, 350}, -1));
+                } else {
+                    v.vibrate(new long[]{0, 350, 150, 350}, -1);
+                }
+            }
+        } catch (Exception ignored) {}
 
         // Wake screen briefly so sleeping kitchen tablet lights up and displays heads-up order popup
         try {
@@ -331,19 +368,37 @@ public class OrderBackgroundService extends Service {
                      (note != null && !note.trim().isEmpty() ? "📝 नोट: " + note.trim() + "\n" : "") +
                      "डैशबोर्ड खोलने के लिए टैप करें");
 
+        android.net.Uri soundUri = android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION);
         Notification notification = new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(contentText)
             .setStyle(bigStyle)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setSound(soundUri)
+            .setVibrate(new long[]{0, 350, 150, 350})
             .setDefaults(Notification.DEFAULT_ALL)
             .setAutoCancel(true)
+            .setFullScreenIntent(pendingIntent, true)
             .setContentIntent(pendingIntent)
             .build();
 
         int alertNotifId = (int) (System.currentTimeMillis() % 100000) + 200;
         manager.notify(alertNotifId, notification);
+
+        // Hardware vibration fallback directly via Vibrator service
+        try {
+            android.os.Vibrator v = (android.os.Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
+            if (v != null && v.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    v.vibrate(android.os.VibrationEffect.createWaveform(new long[]{0, 350, 150, 350}, -1));
+                } else {
+                    v.vibrate(new long[]{0, 350, 150, 350}, -1);
+                }
+            }
+        } catch (Exception ignored) {}
 
         // Wake screen briefly so sleeping kitchen tablet lights up and displays heads-up service popup
         try {
