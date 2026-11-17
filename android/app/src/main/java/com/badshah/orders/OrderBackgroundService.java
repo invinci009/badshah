@@ -28,11 +28,14 @@ public class OrderBackgroundService extends Service {
     public static final String BG_CHANNEL_ID = "badshah_orders_bg_channel";
     public static final String ALERT_CHANNEL_ID = "badshah_orders_alert_channel";
     private static final int FOREGROUND_NOTIFICATION_ID = 2001;
+    private static final int ORDER_ALERT_NOTIFICATION_ID = 2002;
+    private static final int SERVICE_ALERT_NOTIFICATION_ID = 2003;
 
     private static TextToSpeech tts;
     private static volatile boolean ttsReady = false;
     private static String pendingSpeech = null;
     private static Context appContext = null;
+    private static PowerManager.WakeLock alertWakeLock = null;
 
     private static final Set<String> announcedOrderIds = Collections.synchronizedSet(new HashSet<>());
     private static final Set<String> announcedServiceRequestIds = Collections.synchronizedSet(new HashSet<>());
@@ -164,14 +167,21 @@ public class OrderBackgroundService extends Service {
         }
     }
 
-    private static void acquireTempWakeLock(Context context, long timeoutMs) {
+    private static synchronized void acquireTempWakeLock(Context context, long timeoutMs) {
         if (context == null) return;
         try {
-            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
-            if (pm != null) {
-                PowerManager.WakeLock lock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BadshahOrders:AlertWakeLock");
-                lock.setReferenceCounted(false);
-                lock.acquire(timeoutMs);
+            if (alertWakeLock == null) {
+                PowerManager pm = (PowerManager) context.getApplicationContext().getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    alertWakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BadshahOrders:AlertWakeLock");
+                    alertWakeLock.setReferenceCounted(false);
+                }
+            }
+            if (alertWakeLock != null) {
+                if (alertWakeLock.isHeld()) {
+                    alertWakeLock.release();
+                }
+                alertWakeLock.acquire(timeoutMs);
             }
         } catch (Exception ignored) {}
     }
@@ -311,8 +321,7 @@ public class OrderBackgroundService extends Service {
         }
 
         Notification notification = builder.build();
-        int alertNotifId = (int) (System.currentTimeMillis() % 100000) + 100;
-        manager.notify(alertNotifId, notification);
+        manager.notify(ORDER_ALERT_NOTIFICATION_ID, notification);
 
         // Hardware vibration fallback only on pre-Oreo Android (Oreo+ channels manage vibration)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -417,8 +426,7 @@ public class OrderBackgroundService extends Service {
         }
 
         Notification notification = builder.build();
-        int alertNotifId = (int) (System.currentTimeMillis() % 100000) + 200;
-        manager.notify(alertNotifId, notification);
+        manager.notify(SERVICE_ALERT_NOTIFICATION_ID, notification);
 
         // Hardware vibration fallback only on pre-Oreo Android (Oreo+ channels manage vibration)
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
@@ -471,14 +479,13 @@ public class OrderBackgroundService extends Service {
                 conn.setRequestProperty("If-None-Match", lastEtag);
             }
 
-            // Forward session cookies so native background poller authenticates when WebView is sleeping
+            // Forward session cookies from persistent storage safely without blocking WebView
             try {
-                android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
-                cm.flush();
-                String cookies = cm.getCookie("https://biriyani-badshah.vercel.app");
-                if (cookies == null || cookies.trim().isEmpty()) {
-                    cookies = getSharedPreferences("badshah_prefs", Context.MODE_PRIVATE)
-                        .getString("saved_cookies", null);
+                String cookies = getSharedPreferences("badshah_prefs", Context.MODE_PRIVATE)
+                    .getString("saved_cookies", null);
+                if ((cookies == null || cookies.trim().isEmpty())) {
+                    android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+                    cookies = cm.getCookie("https://biriyani-badshah.vercel.app");
                 }
                 if (cookies != null && !cookies.trim().isEmpty()) {
                     conn.setRequestProperty("Cookie", cookies);
@@ -590,12 +597,11 @@ public class OrderBackgroundService extends Service {
             }
 
             try {
-                android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
-                cm.flush();
-                String cookies = cm.getCookie("https://biriyani-badshah.vercel.app");
-                if (cookies == null || cookies.trim().isEmpty()) {
-                    cookies = getSharedPreferences("badshah_prefs", Context.MODE_PRIVATE)
-                        .getString("saved_cookies", null);
+                String cookies = getSharedPreferences("badshah_prefs", Context.MODE_PRIVATE)
+                    .getString("saved_cookies", null);
+                if ((cookies == null || cookies.trim().isEmpty())) {
+                    android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+                    cookies = cm.getCookie("https://biriyani-badshah.vercel.app");
                 }
                 if (cookies != null && !cookies.trim().isEmpty()) {
                     conn.setRequestProperty("Cookie", cookies);

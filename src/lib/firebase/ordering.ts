@@ -1,5 +1,5 @@
 import 'server-only'
-import type { Firestore } from 'firebase-admin/firestore'
+import { FieldValue, type Firestore } from 'firebase-admin/firestore'
 import { getAdminFirestore } from './admin'
 import { getCached, invalidateCache } from '../cache'
 import { sendMobileOrderAlarm } from '../server/pushNotifier'
@@ -625,6 +625,7 @@ export async function getOrder(id: string): Promise<Order | null> {
 interface ActiveOrdersCacheState {
   orders: Order[]
   fetchedAt: number
+  syncedAt: number
   inFlight: Promise<Order[]> | null
   etag: string
 }
@@ -636,9 +637,32 @@ declare global {
 const activeOrdersCache: ActiveOrdersCacheState = (globalThis.__rp_activeOrdersCache ??= {
   orders: [],
   fetchedAt: 0,
+  syncedAt: 0,
   inFlight: null,
   etag: '',
 })
+
+/**
+ * Lightweight sync version coordinator in Firestore (counters/syncState).
+ * Allows any serverless instance to coordinate with exactly 1 document read instead of 23-60 reads.
+ */
+async function bumpSyncState(scope: 'orders' | 'serviceRequests'): Promise<void> {
+  try {
+    const db = getDb()
+    const now = Date.now()
+    const field = scope === 'orders' ? 'ordersUpdatedAt' : 'serviceRequestsUpdatedAt'
+    await db.doc('counters/syncState').set(
+      {
+        [field]: now,
+        [`${scope}Version`]: FieldValue.increment(1),
+        lastUpdatedAt: now,
+      },
+      { merge: true }
+    )
+  } catch {
+    // Non-critical background sync
+  }
+}
 
 export function computeOrdersEtag(list: Order[]): string {
   if (!list || list.length === 0) return 'W/"ao-empty"'
@@ -654,16 +678,91 @@ export function computeOrdersEtag(list: Order[]): string {
   return `W/"ao-${(hash >>> 0).toString(36)}-${list.length}"`
 }
 
+/**
+ * Write-through in-memory patch when an order is created.
+ * Updates cache instantly (0ms latency, 0 Firestore reads) so subsequent polls see it immediately.
+ */
+export function patchActiveOrdersCacheOnCreate(order: Order): void {
+  const existingIdx = activeOrdersCache.orders.findIndex((o) => o.id === order.id)
+  if (existingIdx === -1) {
+    activeOrdersCache.orders.unshift(order)
+    if (activeOrdersCache.orders.length > 60) {
+      activeOrdersCache.orders = activeOrdersCache.orders.slice(0, 60)
+    }
+  } else {
+    activeOrdersCache.orders[existingIdx] = order
+  }
+  const now = Date.now()
+  activeOrdersCache.fetchedAt = now
+  activeOrdersCache.syncedAt = now
+  activeOrdersCache.etag = computeOrdersEtag(activeOrdersCache.orders)
+  invalidateCache('orders:')
+  invalidateCache('order:')
+
+  bumpSyncState('orders').catch(() => {})
+}
+
+/**
+ * Write-through in-memory patch when order status changes.
+ */
+export function patchActiveOrdersCacheOnTransition(orderId: string, to: FulfilmentStatus): void {
+  const existingIdx = activeOrdersCache.orders.findIndex((o) => o.id === orderId)
+  if (existingIdx !== -1) {
+    if (to === 'SERVED' || to === 'CANCELLED') {
+      activeOrdersCache.orders.splice(existingIdx, 1)
+    } else {
+      activeOrdersCache.orders[existingIdx] = {
+        ...activeOrdersCache.orders[existingIdx],
+        fulfilment: to,
+        updatedAt: serverNow(),
+      }
+    }
+  }
+  const now = Date.now()
+  activeOrdersCache.fetchedAt = now
+  activeOrdersCache.syncedAt = now
+  activeOrdersCache.etag = computeOrdersEtag(activeOrdersCache.orders)
+  invalidateCache('orders:')
+  invalidateCache('order:')
+
+  bumpSyncState('orders').catch(() => {})
+}
+
+/**
+ * Write-through in-memory patch when payment changes.
+ */
+export function patchActiveOrdersCacheOnPayment(orderId: string, paymentStatus: string, paidPaise?: number, refundedPaise?: number): void {
+  const existingIdx = activeOrdersCache.orders.findIndex((o) => o.id === orderId)
+  if (existingIdx !== -1) {
+    activeOrdersCache.orders[existingIdx] = {
+      ...activeOrdersCache.orders[existingIdx],
+      paymentStatus: paymentStatus as any,
+      paidPaise: paidPaise ?? activeOrdersCache.orders[existingIdx].paidPaise,
+      refundedPaise: refundedPaise ?? activeOrdersCache.orders[existingIdx].refundedPaise,
+      updatedAt: serverNow(),
+    }
+  }
+  const now = Date.now()
+  activeOrdersCache.fetchedAt = now
+  activeOrdersCache.syncedAt = now
+  activeOrdersCache.etag = computeOrdersEtag(activeOrdersCache.orders)
+  invalidateCache('orders:')
+  invalidateCache('order:')
+
+  bumpSyncState('orders').catch(() => {})
+}
+
 export function invalidateActiveOrdersCache(): void {
-  activeOrdersCache.fetchedAt = 0
+  // Graceful invalidation: bump sync timestamp so background checks revalidate,
+  // but keep existing orders so active orders poller can still return immediate 304 if unchanged!
+  activeOrdersCache.syncedAt = 0
   activeOrdersCache.inFlight = null
-  activeOrdersCache.etag = `W/"ao-${Date.now()}"`
   invalidateCache('orders:')
   invalidateCache('order:')
 }
 
 export function getActiveOrdersEtag(): string {
-  if (activeOrdersCache.fetchedAt === 0) return ''
+  if (activeOrdersCache.fetchedAt === 0 && activeOrdersCache.orders.length === 0) return ''
   return activeOrdersCache.etag || computeOrdersEtag(activeOrdersCache.orders)
 }
 
@@ -674,11 +773,11 @@ export async function getOrders(limit = 100): Promise<Order[]> {
 
 /** 
  * Query only currently active kitchen/service orders in real-time.
- * Uses 4-second in-memory coalesced cache to protect Firestore from polling spikes.
+ * Uses 25-second in-memory coalesced cache and lightweight 1-doc sync check to eliminate collection scans.
  */
 export async function getActiveOrders(limit = 50, forceFresh = false): Promise<Order[]> {
   const now = Date.now()
-  const TTL_MS = 25000 // 25 seconds: shields Firestore against polling spikes; invalidated instantly on any order mutation
+  const TTL_MS = 25000 // 25 seconds fast-path: 0 Firestore reads
 
   // 1. Fast-path: Return fresh in-memory data if valid and not forced
   if (
@@ -699,7 +798,26 @@ export async function getActiveOrders(limit = 50, forceFresh = false): Promise<O
     }
   }
 
-  // 3. Authoritative Firestore query with explicit limit
+  // 3. Lightweight Sync Check: If we already have cached orders, check if anything changed across instances
+  // Cost: exactly 1 document read instead of reading all 23-60 orders!
+  if (!forceFresh && activeOrdersCache.orders.length > 0 && activeOrdersCache.syncedAt > 0) {
+    try {
+      const syncSnap = await getDb().doc('counters/syncState').get()
+      if (syncSnap.exists) {
+        const syncData = syncSnap.data()
+        const remoteUpdated = (syncData?.ordersUpdatedAt as number) || 0
+        if (remoteUpdated <= activeOrdersCache.syncedAt) {
+          // Zero changes across all server instances! Extend TTL and return cached orders immediately.
+          activeOrdersCache.fetchedAt = Date.now()
+          return activeOrdersCache.orders.slice(0, limit)
+        }
+      }
+    } catch {
+      // If sync check fails, proceed to query
+    }
+  }
+
+  // 4. Authoritative Firestore query when initial startup or remote change detected
   const fetchPromise = (async () => {
     try {
       const snap = await getDb()
@@ -712,7 +830,9 @@ export async function getActiveOrders(limit = 50, forceFresh = false): Promise<O
       list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
 
       activeOrdersCache.orders = list
-      activeOrdersCache.fetchedAt = Date.now()
+      const fetchTime = Date.now()
+      activeOrdersCache.fetchedAt = fetchTime
+      activeOrdersCache.syncedAt = fetchTime
 
       activeOrdersCache.etag = computeOrdersEtag(list)
 
@@ -861,7 +981,8 @@ export async function createOrder(data: Omit<Order, 'id'>): Promise<Order> {
       .catch(() => {})
     invalidateCache('tables:all')
   }
-  invalidateActiveOrdersCache()
+  const createdOrder = { id: ref.id, ...data } as Order
+  patchActiveOrdersCacheOnCreate(createdOrder)
   invalidateCache(`order:${ref.id}`)
   if (data.customerPhone) {
     invalidateCache(`orders:phone:${data.customerPhone}`)
@@ -877,7 +998,7 @@ export async function createOrder(data: Omit<Order, 'id'>): Promise<Order> {
     console.warn('[PushNotifier] Error sending mobile alarm:', err)
   })
 
-  return { id: ref.id, ...data } as Order
+  return createdOrder
 }
 
 /** Validated fulfilment transition inside a transaction + audit event. */
@@ -960,7 +1081,6 @@ export async function transitionOrderStatus(
             }
           : null,
       })
-      invalidateActiveOrdersCache()
     } else if (to === 'CANCELLED') {
       await loyalty.handleOrderCancelledForLoyalty({
         id: updated.id,
@@ -970,27 +1090,13 @@ export async function transitionOrderStatus(
         loyaltyPointsEarned: updated.loyaltyPointsEarned,
         loyalty: updated.loyalty ? { redemptionId: updated.loyalty.redemptionId } : null,
       })
-      invalidateActiveOrdersCache()
     }
   } catch (err) {
     console.error(`[Loyalty] lifecycle hook failed for order ${orderId}:`, err)
   }
 
-  // Update in-memory active orders cache immediately so concurrent getOrder calls see the new status
-  const existingIdx = activeOrdersCache.orders.findIndex((o) => o.id === orderId)
-  if (existingIdx !== -1) {
-    if (to === 'SERVED' || to === 'CANCELLED') {
-      activeOrdersCache.orders.splice(existingIdx, 1)
-    } else {
-      activeOrdersCache.orders[existingIdx] = {
-        ...activeOrdersCache.orders[existingIdx],
-        fulfilment: to,
-        updatedAt: serverNow(),
-      }
-    }
-  }
-
-  invalidateActiveOrdersCache()
+  // Update in-memory active orders cache immediately and bump sync state (0 Firestore reads)
+  patchActiveOrdersCacheOnTransition(orderId, to)
   invalidateCache(`order:${orderId}`)
   if (updated.customerPhone) {
     invalidateCache(`orders:phone:${updated.customerPhone}`)
@@ -1062,14 +1168,15 @@ export async function updateOrder(
     }
   }
 
-  invalidateActiveOrdersCache()
   invalidateCache(`order:${orderId}`)
   const changedPhone = updates.customerPhone || prev.customerPhone
   if (changedPhone) {
     invalidateCache(`orders:phone:${changedPhone}`)
   }
   const updatedSnap = await ref.get()
-  return { id: updatedSnap.id, ...updatedSnap.data() } as Order
+  const updatedOrder = { id: updatedSnap.id, ...updatedSnap.data() } as Order
+  patchActiveOrdersCacheOnCreate(updatedOrder)
+  return updatedOrder
 }
 
 /** Record a collection/refund inside a transaction. Prevents over-collection. */
@@ -1133,7 +1240,7 @@ export async function recordPaymentEntry(data: {
     })
     return { ...order, paidPaise: paid, refundedPaise: refunded, paymentStatus }
   })
-  invalidateActiveOrdersCache()
+  patchActiveOrdersCacheOnPayment(data.orderId, updated.paymentStatus, updated.paidPaise, updated.refundedPaise)
   invalidateCache('payments:recent')
   invalidateCache(`order:${data.orderId}`)
 
@@ -1229,6 +1336,7 @@ export interface ServiceRequest {
 interface ActiveServiceRequestsCacheState {
   requests: ServiceRequest[]
   fetchedAt: number
+  syncedAt: number
   inFlight: Promise<ServiceRequest[]> | null
   etag: string
 }
@@ -1240,6 +1348,7 @@ declare global {
 const activeServiceRequestsCache: ActiveServiceRequestsCacheState = (globalThis.__rp_activeServiceRequestsCache ??= {
   requests: [],
   fetchedAt: 0,
+  syncedAt: 0,
   inFlight: null,
   etag: '',
 })
@@ -1258,15 +1367,51 @@ export function computeServiceRequestsEtag(list: ServiceRequest[]): string {
   return `W/"sr-${(hash >>> 0).toString(36)}-${list.length}"`
 }
 
+export function patchActiveServiceRequestsOnCreate(req: ServiceRequest): void {
+  const existing = activeServiceRequestsCache.requests.some((r) => r.id === req.id)
+  if (!existing) {
+    activeServiceRequestsCache.requests.unshift(req)
+    if (activeServiceRequestsCache.requests.length > 50) {
+      activeServiceRequestsCache.requests = activeServiceRequestsCache.requests.slice(0, 50)
+    }
+  }
+  const now = Date.now()
+  activeServiceRequestsCache.fetchedAt = now
+  activeServiceRequestsCache.syncedAt = now
+  activeServiceRequestsCache.etag = computeServiceRequestsEtag(activeServiceRequestsCache.requests)
+  invalidateCache('serviceRequests')
+  bumpSyncState('serviceRequests').catch(() => {})
+}
+
+export function patchActiveServiceRequestsOnUpdate(id: string, status: ServiceRequest['status']): void {
+  if (status !== 'OPEN') {
+    activeServiceRequestsCache.requests = activeServiceRequestsCache.requests.filter((r) => r.id !== id)
+  } else {
+    const idx = activeServiceRequestsCache.requests.findIndex((r) => r.id === id)
+    if (idx !== -1) {
+      activeServiceRequestsCache.requests[idx] = {
+        ...activeServiceRequestsCache.requests[idx],
+        status,
+        updatedAt: serverNow(),
+      }
+    }
+  }
+  const now = Date.now()
+  activeServiceRequestsCache.fetchedAt = now
+  activeServiceRequestsCache.syncedAt = now
+  activeServiceRequestsCache.etag = computeServiceRequestsEtag(activeServiceRequestsCache.requests)
+  invalidateCache('serviceRequests')
+  bumpSyncState('serviceRequests').catch(() => {})
+}
+
 export function invalidateActiveServiceRequestsCache(): void {
-  activeServiceRequestsCache.fetchedAt = 0
+  activeServiceRequestsCache.syncedAt = 0
   activeServiceRequestsCache.inFlight = null
-  activeServiceRequestsCache.etag = `W/"sr-${Date.now()}"`
   invalidateCache('serviceRequests')
 }
 
 export function getActiveServiceRequestsEtag(): string {
-  if (activeServiceRequestsCache.fetchedAt === 0) return ''
+  if (activeServiceRequestsCache.fetchedAt === 0 && activeServiceRequestsCache.requests.length === 0) return ''
   return activeServiceRequestsCache.etag || computeServiceRequestsEtag(activeServiceRequestsCache.requests)
 }
 
@@ -1290,8 +1435,9 @@ export async function createServiceRequest(data: {
     resolvedAt: null,
   }
   await ref.set(stripUndefined({ ...req }))
-  invalidateActiveServiceRequestsCache()
-  return { id: ref.id, ...req } as ServiceRequest
+  const created = { id: ref.id, ...req } as ServiceRequest
+  patchActiveServiceRequestsOnCreate(created)
+  return created
 }
 
 export async function getServiceRequests(status?: string, limit = 50, forceFresh = false): Promise<ServiceRequest[]> {
@@ -1312,6 +1458,23 @@ export async function getServiceRequests(status?: string, limit = 50, forceFresh
       }
     }
 
+    // Lightweight syncState check: 1 doc read instead of reading all open requests
+    if (!forceFresh && activeServiceRequestsCache.requests.length > 0 && activeServiceRequestsCache.syncedAt > 0) {
+      try {
+        const syncSnap = await getDb().doc('counters/syncState').get()
+        if (syncSnap.exists) {
+          const syncData = syncSnap.data()
+          const remoteUpdated = (syncData?.serviceRequestsUpdatedAt as number) || 0
+          if (remoteUpdated <= activeServiceRequestsCache.syncedAt) {
+            activeServiceRequestsCache.fetchedAt = Date.now()
+            return activeServiceRequestsCache.requests.slice(0, limit)
+          }
+        }
+      } catch {
+        // Fall through to query if sync check fails
+      }
+    }
+
     const fetchPromise = (async () => {
       try {
         let query = getDb().collection('serviceRequests') as FirebaseFirestore.Query
@@ -1323,7 +1486,9 @@ export async function getServiceRequests(status?: string, limit = 50, forceFresh
         docs.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
 
         activeServiceRequestsCache.requests = docs
-        activeServiceRequestsCache.fetchedAt = Date.now()
+        const fetchTime = Date.now()
+        activeServiceRequestsCache.fetchedAt = fetchTime
+        activeServiceRequestsCache.syncedAt = fetchTime
         activeServiceRequestsCache.etag = computeServiceRequestsEtag(docs)
 
         return docs
@@ -1355,5 +1520,5 @@ export async function updateServiceRequest(id: string, status: ServiceRequest['s
   const updates: Record<string, unknown> = { status, updatedAt: serverNow() }
   if (status === 'RESOLVED' || status === 'CANCELLED') updates.resolvedAt = serverNow()
   await getDb().doc(`serviceRequests/${id}`).update(updates)
-  invalidateActiveServiceRequestsCache()
+  patchActiveServiceRequestsOnUpdate(id, status)
 }
